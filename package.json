@@ -1,0 +1,45 @@
+{
+  "name": "dsh-read-zoom",
+  "version": "0.2.1",
+  "type": "module",
+  "description": "Adds a fixed enlarge button to every DSH answer's action row and opens that answer in a full-screen reading panel with adjustable text zoom.",
+  "license": "MIT",
+  "author": "liuyifeng-code",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liuyifeng-code/dsh-read-zoom.git"
+  },
+  "homepage": "https://github.com/liuyifeng-code/dsh-read-zoom#readme",
+  "bugs": {
+    "url": "https://github.com/liuyifeng-code/dsh-read-zoom/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "reading",
+    "font-size",
+    "markdown"
+  ],
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}

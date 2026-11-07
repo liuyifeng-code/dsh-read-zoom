@@ -1,0 +1,6 @@
+# 放大阅读（dsh-read-zoom）bundle patch。
+# bundle 被选中后，把 Host 半插入 profile 插件树；浏览器半由 package.json 的
+# dsh.client 声明自动被客户端模块系统拾取（见 package.json 的 dsh.client）。
+- insert:
+    - id: dsh-read-zoom
+      name: dsh-read-zoom
