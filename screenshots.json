@@ -1,1 +1,7 @@
-["assets/action-row.png", "assets/panel.png", "assets/panel-200.png"]
+[
+  "assets/action-row.png",
+  "assets/panel-turns.png",
+  "assets/panel.png",
+  "assets/panel-200.png",
+  "assets/compose.png"
+]

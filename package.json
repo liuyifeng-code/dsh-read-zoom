@@ -1,37 +1,19 @@
 {
   "name": "dsh-read-zoom",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
-  "description": "Adds a fixed enlarge button to every DSH answer's action row and opens that answer in a full-screen reading panel with adjustable text zoom.",
-  "license": "MIT",
-  "author": "liuyifeng-code",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/liuyifeng-code/dsh-read-zoom.git"
-  },
-  "homepage": "https://github.com/liuyifeng-code/dsh-read-zoom#readme",
-  "bugs": {
-    "url": "https://github.com/liuyifeng-code/dsh-read-zoom/issues"
-  },
-  "keywords": [
-    "dsh-plugin",
-    "deepseek-harness",
-    "dsh",
-    "reading",
-    "font-size",
-    "markdown"
-  ],
-  "files": [
-    "index.js",
-    "client.js",
-    "cordis.patch.yml",
-    "README.md",
-    "LICENSE"
-  ],
+  "description": "放大阅读：在每条回答的操作行（用量左边）常驻放大按钮，把整轮提问与回答放进全屏大字号阅读区；左栏可跳转任意轮次、随手写下一句并填入输入框，公式/化学式渲染更稳，内置数学与化学输出规约一键复制。",
+  "main": "index.js",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js"
   },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
