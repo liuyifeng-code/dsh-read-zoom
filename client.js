@@ -35,8 +35,10 @@ window.__ModuleLoader__.load({
     const STEP = 0.1
     const HOST_ATTR = 'data-text-interaction-source'
     const GUARD = 'dsh-read-zoom'
+    // v0.3.2：操作行按钮的同步函数（安装时赋值），浮层关闭后用它补一次，避免依赖整页 MutationObserver。
+    let actionSync = null
     // 版本号：DOM 上会写进 data-dshzr-version，便于在真实 DSH 里确认加载的是哪一版。
-    const VERSION = '0.3.1'
+    const VERSION = '0.3.2'
     // 每轮回答底部的操作行所在容器（DSH chat 的 TurnTailNodeView 带这个属性）。
     const TAIL_ATTR = 'data-turn-tail'
     // 16px 对角双箭头（放大/展开），药丸与操作行按钮共用；stroke 用 currentColor 跟随主题。
@@ -102,11 +104,13 @@ window.__ModuleLoader__.load({
       '.dshzr-fab:focus-visible,.dshzr-pill:focus-visible,.dshzr-btn:focus-visible{outline:2px solid var(--dsw-alias-label-tertiary,#8a8a91);outline-offset:2px}',
 
       /* 全屏阅读浮层 */
+      /* v0.3.2：去掉 backdrop-filter:blur()。整屏模糊会让 Chromium 在每次重绘（滚动/输入/打字）
+         都重新采样并模糊背后的大段聊天 DOM，是「一卡一卡」的主要来源；纯半透明遮罩几乎零成本。 */
       '.dshzr-backdrop{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;',
       'justify-content:center;padding:3vh 3vw;box-sizing:border-box;',
-      'background:var(--dsw-alias-bg-mask-1,rgba(16,18,22,.55));backdrop-filter:blur(2px)}',
+      'background:var(--dsw-alias-bg-mask-1,rgba(16,18,22,.55))}',
       '.dshzr-panel{display:flex;flex-direction:column;width:min(1280px,96vw);height:min(92vh,940px);',
-      'max-height:94vh;',
+      'max-height:94vh;contain:layout paint;',
       'box-sizing:border-box;overflow:hidden;',
       'border-radius:var(--dsw-radius-panel,16px);',
       'background:var(--dsw-alias-bg-layer-2,#ffffff);',
@@ -180,7 +184,10 @@ window.__ModuleLoader__.load({
       '.dshzr-zoom{min-width:52px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary,#191919)}',
       '.dshzr-close{margin-left:4px}',
       '.dshzr-scroller{flex:1 1 auto;min-width:0;overflow:auto;overscroll-behavior:contain;',
+      'contain:layout paint;will-change:scroll-position;',
       'padding:20px 28px 40px;box-sizing:border-box}',
+      /* v0.3.2：单轮内容整体做布局/绘制隔离，减少滚动时的重排范围 */
+      '.dshzr-content .dshzr-item{contain:layout paint}',
       '.dshzr-content{zoom:1.4;transform-origin:top left}',
       '.dshzr-content .katex-display{overflow-x:auto;overflow-y:hidden;max-width:100%;padding:2px 0}',
       '.dshzr-content .katex-display > .katex{display:inline-block;transform-origin:left center}',
@@ -190,7 +197,9 @@ window.__ModuleLoader__.load({
       'white-space:pre-wrap;word-break:break-word}',
       '.dshzr-content table{max-width:100%}',
       '.dshzr-content button,.dshzr-content [role="button"]{display:none!important}',
-      '.dshzr-content *{max-width:100%;box-sizing:border-box}',
+      '.dshzr-content p,.dshzr-content li,.dshzr-content h1,.dshzr-content h2,.dshzr-content h3,',
+      '.dshzr-content h4,.dshzr-content pre,.dshzr-content blockquote,.dshzr-content table,',
+      '.dshzr-content img,.dshzr-content video,.dshzr-content .katex-display{max-width:100%;box-sizing:border-box}',
       '.dshzr-content [class*="actions"]{display:none!important}',
       '.dshzr-content img,.dshzr-content video{height:auto}',
       '.dshzr-toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:2147483500;',
@@ -480,18 +489,40 @@ window.__ModuleLoader__.load({
       }
 
       ensure()
+      actionSync = ensure
+      // v0.3.2：之前对整页 body 的 childList 变化做 80ms 去抖重扫，流式输出 / 虚拟滚动 / 打字都会
+      // 触发密集回调，每次回调还要遍历所有 [data-turn-tail]，这是「一卡一卡」的直接原因之一。
+      // 现在三重降噪：① 浮层打开时完全不扫（按钮在浮层后面，扫了也看不见）；② 页面不可见时跳过；
+      // ③ 用 requestIdleCallback 排进空闲时段（最长 600ms 兜底），不再和输入抢主线程。
       let timer = 0
-      const observer = new MutationObserver(() => {
+      let timerIdle = false
+      const schedule = () => {
         if (timer !== 0) return
-        timer = window.setTimeout(() => {
+        const run = () => {
           timer = 0
+          timerIdle = false
+          if (document.hidden) return
           ensure()
-        }, 80)
+        }
+        if (typeof window.requestIdleCallback === 'function') {
+          timer = window.requestIdleCallback(run, { timeout: 600 })
+          timerIdle = true
+        } else {
+          timer = window.setTimeout(run, 260)
+        }
+      }
+      const observer = new MutationObserver(() => {
+        if (document.querySelector('.dshzr-backdrop') !== null) return
+        schedule()
       })
       observer.observe(document.body, { childList: true, subtree: true })
       return () => {
         observer.disconnect()
-        window.clearTimeout(timer)
+        if (timer !== 0) {
+          if (timerIdle && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(timer)
+          window.clearTimeout(timer)
+        }
+        if (actionSync === ensure) actionSync = null
         for (const button of buttons) button.remove()
         buttons.clear()
       }
@@ -727,25 +758,38 @@ window.__ModuleLoader__.load({
       return { ok: false, reason: 'echo-mismatch' }
     }
 
-    /** 超宽公式等比缩小到放得下（DSH 原生 display 公式只横滚不换行）。 */
+    /** 超宽公式等比缩小到放得下（DSH 原生 display 公式只横滚不换行）。
+     *  v0.3.2：改成「一次清样式 → 一次批量量宽度 → 一次批量写样式」，避免逐个公式读写交替
+     *  触发几十次重排（打开浮层时的主要卡顿来源之一）。 */
     function fitFormulas(scroller, content) {
       if (!scroller || !content) return
-      const zoom = Number.parseFloat(content.style.zoom) || 1
+      const displays = content.querySelectorAll('.katex-display')
+      if (displays.length === 0) return
       const available = scroller.clientWidth - 56
       if (available <= 0) return
-      for (const katex of content.querySelectorAll('.katex-display > .katex')) {
-        katex.style.fontSize = ''
-        const natural = katex.getBoundingClientRect().width / zoom
-        if (natural > available) {
-          const ratio = Math.max(0.45, available / natural)
-          katex.style.fontSize = ratio.toFixed(3) + 'em'
-        }
+      const targets = []
+      for (const display of displays) {
+        const katex = display.firstElementChild
+        if (katex === null || katex.classList.contains('katex') === false) continue
+        if (katex.style.fontSize !== '') katex.style.fontSize = ''
+        targets.push(katex)
       }
+      if (targets.length === 0) return
+      const widths = targets.map((katex) => katex.getBoundingClientRect().width)
+      targets.forEach((katex, index) => {
+        const width = widths[index]
+        if (width <= available) return
+        const ratio = Math.max(0.45, available / width)
+        katex.style.fontSize = ratio.toFixed(3) + 'em'
+      })
     }
 
     /* ── 全屏阅读浮层 ──────────────────────────────────────────────────── */
     function sanitizeClone(node) {
       node.querySelectorAll('script,style,link,iframe,object,embed,noscript').forEach((child) => child.remove())
+      // v0.3.2：每个公式都有 MathML（给读屏/复制用）与 HTML 两份；浮层里只保留可视的 HTML 那份，
+      // 公式节点的数量直接减半，打开与滚动都更轻。
+      node.querySelectorAll('.katex-mathml').forEach((child) => child.remove())
       node.querySelectorAll('[id]').forEach((child) => child.removeAttribute('id'))
       node.querySelectorAll('[' + HOST_ATTR + ']').forEach((child) => child.removeAttribute(HOST_ATTR))
       node.querySelectorAll('[contenteditable]').forEach((child) => child.setAttribute('contenteditable', 'false'))
@@ -843,6 +887,12 @@ window.__ModuleLoader__.load({
         if (state.disposeKey) state.disposeKey()
         state.disposeKey = null
         document.body.classList.remove('dshzr-noscroll')
+        // 浮层期间为了不抢主线程，操作行按钮的同步被跳过了；关闭后补一次（等 React 落完这一帧）
+        if (typeof actionSync === 'function') {
+          window.setTimeout(() => {
+            if (typeof actionSync === 'function') actionSync()
+          }, 160)
+        }
         const previous = state.prevFocus
         state.prevFocus = null
         if (previous && previous.isConnected && typeof previous.focus === 'function') {
@@ -1051,33 +1101,47 @@ window.__ModuleLoader__.load({
         }
         state.turns = result.turns
         renderTurnList()
-        void enrichPrompts()
+        void enrichVisible()
       }
 
-      async function enrichPrompts() {
+      /** 只给「左栏里正显示着」的轮次补提问摘要。
+       *  悬停预览要靠派发 pointermove 让 DSH 渲染预览，一次性对全部轮次做会在打开时占满主线程
+       *  （v0.3.1 打开卡顿的来源之一）。v0.3.2 改成滚到哪补到哪，每次最多 6 条。 */
+      let enrichBusy = false
+      async function enrichVisible() {
         const nav = state.rail
-        if (nav === null) return
-        const seq = state.enrichSeq + 1
-        state.enrichSeq = seq
-        const deadline = Date.now() + 5000
-        for (const entry of state.turns) {
-          if (seq !== state.enrichSeq || !state.open) break
-          if (Date.now() > deadline) break
-          if (entry.prompt !== '') continue
-          const mark = marksOf(nav).find((candidate) => candidate.turn === entry.turn)
-          if (mark === undefined) continue
-          try {
-            mark.button.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
-          } catch (error) {
-            break
+        const list = state.turnList
+        if (nav === null || list === null || enrichBusy) return
+        enrichBusy = true
+        try {
+          const box = list.getBoundingClientRect()
+          let budget = 6
+          for (const entry of state.turns) {
+            if (budget <= 0) break
+            if (!state.open) return
+            if (entry.prompt !== '') continue
+            const button = list.querySelector('.dshzr-turn[data-turn="' + entry.turn + '"]')
+            if (button === null) continue
+            const rect = button.getBoundingClientRect()
+            if (rect.bottom < box.top - 24 || rect.top > box.bottom + 24) continue
+            const mark = marksOf(nav).find((candidate) => candidate.turn === entry.turn)
+            if (mark === undefined) continue
+            budget -= 1
+            try {
+              mark.button.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
+            } catch (error) {
+              return
+            }
+            await sleep(40)
+            const promptNode = nav.querySelector('[class*="previewPrompt"]')
+            if (promptNode === null) continue
+            const text = summarise(promptNode.textContent, 120)
+            if (text === '') continue
+            entry.prompt = text
+            updateTurnLabel(entry)
           }
-          await sleep(36)
-          const promptNode = nav.querySelector('[class*="previewPrompt"]')
-          if (promptNode === null) continue
-          const text = summarise(promptNode.textContent, 120)
-          if (text === '') continue
-          entry.prompt = text
-          updateTurnLabel(entry)
+        } finally {
+          enrichBusy = false
         }
         try {
           nav.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }))
@@ -1223,6 +1287,19 @@ window.__ModuleLoader__.load({
         turnList.className = 'dshzr-turns-list'
         state.turnList = turnList
         state.turnsHead = asideHead
+        // 列表滚动时只补「当前看得见」的摘要，避免打开时对每一轮都派发 pointermove 去借预览
+        let listTimer = 0
+        turnList.addEventListener(
+          'scroll',
+          () => {
+            if (listTimer !== 0) return
+            listTimer = window.setTimeout(() => {
+              listTimer = 0
+              void enrichVisible()
+            }, 90)
+          },
+          { passive: true },
+        )
         aside.appendChild(asideHead)
         aside.appendChild(turnList)
         aside.appendChild(buildCompose())
