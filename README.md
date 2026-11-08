@@ -8,7 +8,7 @@
 
 1. **回答操作行常驻按钮**：在每条回答底部的操作行里、`用量` 图标的左边插入一个「放大」按钮。位置固定，不跟随鼠标、不随滚动漂移；外观复用同排原生按钮的 class，深浅色主题自动一致。
 2. **两栏阅读浮层**（v0.3.0）：右边是整轮「提问 + 回答」的 DOM 克隆（KaTeX 公式、表格、代码块、图片都在），用 CSS `zoom` 整体等比放大，默认 140%，范围 80%–300%。
-3. **左栏轮次列表**（v0.3.0）：列出本会话每一轮（带提问摘要），点任意一行或按 `↑` / `↓` 切换到那一轮的提问 + 回答，当前轮高亮。
+3. **左栏轮次列表**（v0.3.0，v0.3.1 改为全量）：列出本会话**所有**轮次（带提问摘要），点任意一行或按 `↑` / `↓` 切换到那一轮的提问 + 回答，当前轮高亮。列表取自 DSH 原生轮次导航，所以还没加载进 DOM 的历史轮次也在；点这样的轮次会先让 DSH 补载历史（带「正在载入」提示，最多等 6 秒，失败可重试）。
 4. **左栏输入框**（v0.3.0）：写完点「填入输入框」把文字写进 DSH 的真实输入框，**只填入、不自动发送**，你确认后再按回车；`Ctrl`/`⌘ + Enter` 同效。这样看完一大段推导可以接着问，不用先退出浮层。
 5. **公式友好**（v0.3.0）：渲染失败的公式（DSH 会显示成红字 `.katex-error`）在浮层里降级为灰底等宽原文，不再刺眼；超宽的独立公式按可用宽度等比缩小，不再只能横向滚动；顶栏 `公式规约` 一键复制数学 / 化学的输出规约（9 条）。
 6. **顶部工具栏**：`A−` / `A+` 步进 10%、百分比数字（点击回到 140%）、`复制文字`、`公式规约`、`关闭`。
@@ -27,9 +27,11 @@
 
 ![panel with turn list](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/panel-turns.png)
 
-单栏面板与 200% 的效果：
+历史轮次还没加载进 DOM 时，点一下会先让 DSH 补载（v0.3.1）：
 
-![panel](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/panel.png)
+![rail](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/panel-rail.png)
+
+放大到 200%：
 
 ![panel 200](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/panel-200.png)
 
@@ -75,7 +77,7 @@ dsh plugin add github:liuyifeng-code/dsh-read-zoom
 
 - 在 DSH 0.2.2-rc.1（桌面版，Web 前端）上开发与验证。
 - 插件纯前端（client 半边），Host 半边是空实现：不注册服务、不改路由、不加依赖，所以版本升级后失效的最大代价是「按钮不出现」，不会影响会话本身。
-- 定位依赖 DSH 前端的三处稳定标记：操作行根节点 `data-turn-tail`、操作行内的 `_endInfo` 容器、时间线的 `[data-chat-turn]` / `[data-conversation-session]`；缺失时会逐级退化成「插在操作行末尾」「只显示单条回答」，不影响其它功能。
+- 定位依赖 DSH 前端的几处稳定标记：操作行根节点 `data-turn-tail`、操作行内的 `_endInfo` 容器、时间线的 `[data-chat-turn]` / `[data-conversation-session]`、轮次导航 `nav[aria-label="轮次导航"]` 里的 `button[class*="mark"]`；缺失时会逐级退化成「插在操作行末尾」「只列出已加载的轮次」「只显示单条回答」，不影响其它功能。
 
 ## 卸载
 
@@ -95,10 +97,11 @@ window.__DSH_READ_ZOOM__.peek()   // { version, overlayOpen, tailButtons, fab, p
 window.__DSHZR_LOG__              // 最近 200 条内部日志
 ```
 
-`peek().version` 可以确认当前加载的是哪个版本；`tailButtons` 是已插入的按钮数量；`panelTurns` 是左栏列出的轮数。
+`peek().version` 可以确认当前加载的是哪个版本；`tailButtons` 是已插入的按钮数量；`panelTurns` 是左栏列出的轮数；`railMarks` 是原生轮次导航里找到的刻度数量（0 表示没找到，此时列表退化为「只列已加载轮次」）。
 
 ## 更新记录
 
+- **0.3.1**：修两个实测问题 —— ① 轮次列表只显示已加载的少数几轮（DSH 时间线虚拟滚动，历史轮次不在 DOM 里），现在改读 DSH 原生轮次导航列出全部轮次，点未加载轮次会等 DSH 补载历史（带提示与重试）；② 右栏出现多个空「回答」（把折叠思考、隐藏占位、`turn-tail` 行也克隆了），现在按行类型过滤、每轮合并成「提问」「回答」两段。关闭浮层时还原主聊天区滚动位置。
 - **0.3.0**：两栏阅读区 —— 左栏轮次列表（点击 / `↑↓` 切换提问+回答）+ 底部输入框（只填入、不发送）；公式相关增强（失败公式降级、超宽公式缩放、`公式规约` 一键复制）。
 - **0.2.2**：修「切换会话后点放大，面板里是上一个会话的回答」—— 先按会话容器 `data-conversation-session`、再按轮次 `data-chat-turn` 定位。
 - **0.2.1**：移除悬停药丸（会跟消息/滚动漂移），入口改为操作行常驻按钮。
@@ -107,7 +110,7 @@ window.__DSHZR_LOG__              // 最近 200 条内部日志
 
 ## English
 
-**dsh-read-zoom** adds a fixed "enlarge" button to every answer's action row in DeepSeek Harness and opens a two-pane full-screen reading view. The right pane is a clone of that turn's prompt and answer, so KaTeX math, tables, code blocks, Mermaid diagrams and images keep their exact rendering, scaled with CSS `zoom` (80%–300%, default 140%). The left pane lists every turn in the current session (with prompt summaries) for one-click jumping and lets you compose the next message — it is **written into DSH's real composer but never auto-sent**. Formula helpers: failed KaTeX renders fall back to grey monospace source instead of red text, overly wide display math is scaled down to fit, and a `公式规约` button copies a tested set of math/chemistry output rules. No renderer replacement, no `app.asar` patching, no dependencies, no network access.
+**dsh-read-zoom** adds a fixed "enlarge" button to every answer's action row in DeepSeek Harness and opens a two-pane full-screen reading view. The right pane is a clone of that turn's prompt and answer, so KaTeX math, tables, code blocks, Mermaid diagrams and images keep their exact rendering, scaled with CSS `zoom` (80%–300%, default 140%). The left pane lists **every** turn in the current session (read from DSH's native turn navigator, including turns that are not loaded into the DOM yet — clicking one asks DSH to backfill its history) with prompt summaries, and lets you compose the next message — it is **written into DSH's real composer but never auto-sent**. Formula helpers: failed KaTeX renders fall back to grey monospace source instead of red text, overly wide display math is scaled down to fit, and a `公式规约` button copies a tested set of math/chemistry output rules. No renderer replacement, no `app.asar` patching, no dependencies, no network access.
 
 ## License
 

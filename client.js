@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({
     const HOST_ATTR = 'data-text-interaction-source'
     const GUARD = 'dsh-read-zoom'
     // 版本号：DOM 上会写进 data-dshzr-version，便于在真实 DSH 里确认加载的是哪一版。
-    const VERSION = '0.3.0'
+    const VERSION = '0.3.1'
     // 每轮回答底部的操作行所在容器（DSH chat 的 TurnTailNodeView 带这个属性）。
     const TAIL_ATTR = 'data-turn-tail'
     // 16px 对角双箭头（放大/展开），药丸与操作行按钮共用；stroke 用 currentColor 跟随主题。
@@ -154,6 +154,15 @@ window.__ModuleLoader__.load({
       '.dshzr-item-tag{display:block;margin:0 0 6px;',
       'font:500 11px/1.4 var(--dsw-font-family,-apple-system,sans-serif);letter-spacing:.04em;',
       'color:var(--dsw-alias-label-tertiary,#8a8a91)}',
+      '.dshzr-item-body>:first-child{margin-top:0}',
+      '.dshzr-item-body>:last-child{margin-bottom:0}',
+      '.dshzr-note{margin:6px 0;padding:10px 12px;border-radius:10px;',
+      'background:var(--dsw-alias-bg-layer-2,#f7f7f8);color:var(--dsw-alias-label-secondary,#6b6b71);',
+      'font:400 13px/1.6 var(--dsw-font-family,-apple-system,sans-serif)}',
+      '.dshzr-note button{margin-left:10px;height:26px;padding:0 10px;border-radius:8px;cursor:pointer;',
+      'border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));background:transparent;',
+      'color:var(--dsw-alias-label-primary,#191919);font:500 12px/1 var(--dsw-font-family,-apple-system,sans-serif)}',
+      '.dshzr-turn[data-unloaded] .dshzr-turn-text{opacity:.72}',
       '.dshzr-head{display:flex;align-items:center;gap:6px;flex:none;padding:10px 12px 10px 16px;',
       'border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08))}',
       '.dshzr-title{font:600 14px/1.4 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);',
@@ -488,20 +497,144 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /* ── 轮次（提问 + 回答）──────────────────────────────────────────────── */
+    /* ── 轮次：用 DSH 原生「轮次导航」拿全量轮次，再从 DOM 取该轮内容 ── */
     function summarise(text, limit) {
       const flat = (text || '').replace(/\s+/g, ' ').trim()
       if (flat.length <= limit) return flat
       return flat.slice(0, limit - 1) + '…'
     }
 
-    /**
-     * 把当前会话容器里的时间线渲染项按「轮次」归组。
-     * 每一轮 = 用户提问（data-chat-flow-kind=user）+ 助手回答（assistant / assistant-step）。
-     */
+    function sleep(ms) {
+      return new Promise((resolve) => window.setTimeout(resolve, ms))
+    }
+
+    /** DSH 原生轮次导航条（TurnNavigator）：nav 里每个按钮代表一轮。 */
+    function findRail(scope) {
+      const roots = []
+      if (scope && typeof scope.querySelector === 'function') roots.push(scope)
+      roots.push(document)
+      for (const root of roots) {
+        for (const nav of root.querySelectorAll('nav')) {
+          if (nav.querySelector('button[class*="mark"]') === null) continue
+          if (root === document && scope && typeof scope.contains === 'function') {
+            const holder = nav.closest('[' + SESSION_ATTR + ']')
+            const session = scope.getAttribute(SESSION_ATTR)
+            if (holder !== null && session !== null) {
+              if (holder.getAttribute(SESSION_ATTR) !== session) continue
+            }
+          }
+          return nav
+        }
+      }
+      return null
+    }
+
+    function railScroller(nav) {
+      const candidate = nav.querySelector('[class*="scroller"]')
+      return candidate === null ? nav : candidate
+    }
+
+    function turnFromLabel(label) {
+      if (typeof label !== 'string') return null
+      const match = label.match(/(\d+)/)
+      if (match === null) return null
+      const turn = Number(match[1])
+      return Number.isSafeInteger(turn) && turn >= 0 ? String(turn) : null
+    }
+
+    function marksOf(nav) {
+      const marks = []
+      for (const button of nav.querySelectorAll('button[class*="mark"]')) {
+        const turn = turnFromLabel(button.getAttribute('aria-label'))
+        if (turn === null) continue
+        marks.push({
+          turn,
+          button,
+          unloaded: String(button.className).indexOf('markUnloaded') !== -1,
+          prompt: '',
+        })
+      }
+      return marks
+    }
+
+    /** 轮次导航条本身也是虚拟滚动的：上下滚一遍，把每一轮的坐标收齐。 */
+    async function railTurns(scope) {
+      const nav = findRail(scope)
+      if (nav === null) return { nav: null, turns: [] }
+      const found = new Map()
+      const collect = () => {
+        for (const mark of marksOf(nav)) {
+          const previous = found.get(mark.turn)
+          if (previous === undefined) {
+            found.set(mark.turn, mark)
+            continue
+          }
+          previous.button = mark.button
+          previous.unloaded = previous.unloaded || mark.unloaded
+        }
+      }
+      collect()
+      const scroller = railScroller(nav)
+      if (scroller.scrollHeight > scroller.clientHeight + 4) {
+        const original = scroller.scrollTop
+        const step = Math.max(30, Math.floor(scroller.clientHeight / 2))
+        const stops = []
+        for (let top = 0; top <= scroller.scrollHeight; top += step) stops.push(top)
+        stops.push(scroller.scrollHeight)
+        for (const top of stops) {
+          scroller.scrollTop = top
+          await sleep(16)
+          collect()
+        }
+        for (let index = stops.length - 1; index >= 0; index -= 1) {
+          scroller.scrollTop = stops[index]
+          await sleep(16)
+          collect()
+        }
+        scroller.scrollTop = original
+      }
+      const turns = Array.from(found.values()).sort((left, right) => Number(left.turn) - Number(right.turn))
+      return { nav, turns }
+    }
+
+    /** 一轮实际渲染出来的行（跳过隐藏行、turn-tail、嵌套行）。 */
+    function turnRows(scope, turn) {
+      const rows = []
+      if (scope === null || typeof scope.querySelectorAll !== 'function') return rows
+      for (const node of scope.querySelectorAll('[' + TURN_ATTR + '="' + turn + '"]')) {
+        if (node.getAttribute(FLOW_KIND_ATTR) === 'turn-tail') continue
+        if (node.hasAttribute('hidden') || node.hasAttribute('data-turn-process-hidden')) continue
+        const parent = node.parentElement
+        const nested = parent === null ? null : parent.closest('[' + TURN_ATTR + ']')
+        if (nested !== null && scope.contains(nested)) continue
+        rows.push(node)
+      }
+      return rows
+    }
+
+    /** 一轮的「提问」「回答」片段（已清理、已剔除空行）。 */
+    function sectionsFor(scope, turn) {
+      const prompts = []
+      const answers = []
+      for (const row of turnRows(scope, turn)) {
+        const kind = row.getAttribute(FLOW_KIND_ATTR) || ''
+        const clone = row.cloneNode(true)
+        for (const extra of clone.querySelectorAll('[data-dshzr-tail],.dshzr-tail-btn')) extra.remove()
+        const clean = sanitizeClone(clone)
+        const text = textOf(clean).trim()
+        const media = clean.querySelector('.katex,img,svg,table,video,canvas') !== null
+        if (text === '' && !media) continue
+        if (kind.indexOf('user') === 0 || kind === 'steering') prompts.push(clean)
+        else answers.push(clean)
+      }
+      return { prompts, answers }
+    }
+
+    /** DOM 里已经渲染出来的轮次（打开面板时先用它，异步再补全）。 */
     function turnsIn(scope) {
       const list = []
       const byTurn = new Map()
+      if (scope === null || typeof scope.querySelectorAll !== 'function') return list
       for (const item of scope.querySelectorAll('[' + TURN_ATTR + ']')) {
         const turn = item.getAttribute(TURN_ATTR)
         if (turn === null || turn === '') continue
@@ -509,27 +642,17 @@ window.__ModuleLoader__.load({
         if (kind === 'turn-tail') continue
         let entry = byTurn.get(turn)
         if (entry === undefined) {
-          entry = { turn, index: list.length, prompt: '', answer: null, items: [] }
+          entry = { turn, prompt: '', unloaded: false }
           byTurn.set(turn, entry)
           list.push(entry)
         }
         if (kind.indexOf('user') === 0) {
           const text = summarise(textOf(item), 120)
           if (text !== '') entry.prompt = text
-          entry.items.push({ kind: 'user', node: item })
-          continue
-        }
-        const message = messageIn(item)
-        if (message !== null && entry.answer === null) entry.answer = message
-        if (message !== null || kind.indexOf('assistant') === 0 || kind === 'reasoning' || kind === 'turn-error') {
-          entry.items.push({ kind: 'answer', node: item })
         }
       }
       const numeric = list.every((entry) => /^\d+$/.test(entry.turn))
       if (numeric) list.sort((left, right) => Number(left.turn) - Number(right.turn))
-      list.forEach((entry, index) => {
-        entry.index = index
-      })
       return list
     }
 
@@ -642,11 +765,22 @@ window.__ModuleLoader__.load({
         prevFocus: null,
         disposeKey: null,
         scope: null,
+        rail: null,
         turns: [],
         entries: new Map(),
         currentTurn: null,
         turnList: null,
+        turnsHead: null,
         composeArea: null,
+        savedScrollTop: null,
+        selectSeq: 0,
+        enrichSeq: 0,
+      }
+
+      function conversationScroller() {
+        const scope = state.scope
+        if (scope === null || typeof scope.querySelector !== 'function') return null
+        return scope.querySelector('[data-conversation-scroll]')
       }
 
       function applyZoom() {
@@ -681,17 +815,31 @@ window.__ModuleLoader__.load({
       function close() {
         if (!state.open) return
         state.open = false
+        state.selectSeq += 1
+        state.enrichSeq += 1
+        const savedScrollTop = state.savedScrollTop
+        const chatScroller = conversationScroller()
+        state.savedScrollTop = null
         if (state.backdrop && state.backdrop.parentNode) state.backdrop.parentNode.removeChild(state.backdrop)
         state.backdrop = null
         state.content = null
         state.zoomLabel = null
         state.scroller = null
         state.turnList = null
+        state.turnsHead = null
         state.composeArea = null
-        state.scope = null
+        state.rail = null
         state.turns = []
         state.entries = new Map()
         state.currentTurn = null
+        if (chatScroller !== null && savedScrollTop !== null) {
+          try {
+            chatScroller.scrollTop = savedScrollTop
+          } catch (error) {
+            /* 还原滚动位置失败不影响关闭 */
+          }
+        }
+        state.scope = null
         if (state.disposeKey) state.disposeKey()
         state.disposeKey = null
         document.body.classList.remove('dshzr-noscroll')
@@ -744,31 +892,120 @@ window.__ModuleLoader__.load({
         }
       }
 
-      /** 把某一轮的「提问 + 回答」渲染到右栏。 */
-      function renderTurn(turn) {
-        if (state.content === null) return
-        const entry = turn === null ? undefined : state.entries.get(turn)
-        state.currentTurn = entry === undefined ? null : entry.turn
-        state.content.innerHTML = ''
-        if (entry !== undefined) {
-          for (const item of entry.items) {
-            if (!item.node || !item.node.isConnected) continue
-            const wrapper = document.createElement('div')
-            wrapper.className = 'dshzr-item'
-            wrapper.setAttribute('data-kind', item.kind)
-            const tag = document.createElement('span')
-            tag.className = 'dshzr-item-tag'
-            tag.textContent = item.kind === 'user' ? '提问' : '回答'
-            wrapper.appendChild(tag)
-            const clone = item.node.cloneNode(true)
-            for (const extra of clone.querySelectorAll('[data-dshzr-tail],.dshzr-tail-btn')) extra.remove()
-            wrapper.appendChild(sanitizeClone(clone))
-            state.content.appendChild(wrapper)
-          }
+      function turnLabel(entry) {
+        const index = state.turns.indexOf(entry)
+        const order = index < 0 ? entry.turn : String(index + 1)
+        return entry.prompt === '' ? '第 ' + order + ' 轮' : entry.prompt
+      }
+
+      function updateTurnLabel(entry) {
+        if (state.turnList === null) return
+        const button = state.turnList.querySelector('.dshzr-turn[data-turn="' + entry.turn + '"]')
+        if (button === null) return
+        const label = turnLabel(entry)
+        const text = button.querySelector('.dshzr-turn-text')
+        if (text !== null) text.textContent = label
+        button.title = label
+      }
+
+      function updateTurnsHead() {
+        if (state.turnsHead !== null) state.turnsHead.textContent = '本会话 · ' + state.turns.length + ' 轮'
+      }
+
+      /** 右栏的提示块（载入中 / 没内容 / 失败重试）。 */
+      function renderNote(text, retryTurn) {
+        const content = state.content
+        if (content === null) return
+        content.innerHTML = ''
+        const note = document.createElement('div')
+        note.className = 'dshzr-note'
+        note.textContent = text
+        if (retryTurn !== undefined && retryTurn !== null) {
+          const retry = document.createElement('button')
+          retry.type = 'button'
+          retry.textContent = '重试'
+          retry.addEventListener('click', () => {
+            void selectTurn(retryTurn)
+          })
+          note.appendChild(retry)
         }
-        highlightTurn()
+        content.appendChild(note)
+        applyZoom()
+      }
+
+      /** 把某一轮的「提问 + 回答」渲染到右栏（同一段只出一个标签）。 */
+      function renderSections(sections) {
+        const content = state.content
+        if (content === null) return
+        content.innerHTML = ''
+        const add = (tag, kind, nodes) => {
+          if (nodes.length === 0) return
+          const wrapper = document.createElement('div')
+          wrapper.className = 'dshzr-item'
+          wrapper.setAttribute('data-kind', kind)
+          const label = document.createElement('span')
+          label.className = 'dshzr-item-tag'
+          label.textContent = tag
+          const body = document.createElement('div')
+          body.className = 'dshzr-item-body'
+          for (const node of nodes) body.appendChild(node)
+          wrapper.appendChild(label)
+          wrapper.appendChild(body)
+          content.appendChild(wrapper)
+        }
+        add('提问', 'user', sections.prompts)
+        add('回答', 'answer', sections.answers)
         if (state.scroller !== null) state.scroller.scrollTop = 0
         applyZoom()
+      }
+
+      /** 这一轮还没进 DOM 时，点原生轮次条让 DSH 去加载历史，等它出现。 */
+      async function ensureTurnLoaded(turn) {
+        if (turnRows(state.scope, turn).length > 0) return true
+        const nav = state.rail === null ? findRail(state.scope) : state.rail
+        if (nav === null) return false
+        const mark = marksOf(nav).find((candidate) => candidate.turn === turn)
+        if (mark === undefined) return false
+        if (state.savedScrollTop === null) {
+          const chatScroller = conversationScroller()
+          state.savedScrollTop = chatScroller === null ? 0 : chatScroller.scrollTop
+        }
+        try {
+          mark.button.click()
+        } catch (error) {
+          return false
+        }
+        const deadline = Date.now() + 6000
+        while (Date.now() < deadline) {
+          if (turnRows(state.scope, turn).length > 0) return true
+          if (!state.open) return false
+          await sleep(90)
+        }
+        return false
+      }
+
+      async function selectTurn(turn) {
+        if (state.content === null || turn === null) return
+        const seq = state.selectSeq + 1
+        state.selectSeq = seq
+        state.currentTurn = turn
+        highlightTurn()
+        const immediate = sectionsFor(state.scope, turn)
+        if (immediate.prompts.length > 0 || immediate.answers.length > 0) {
+          renderSections(immediate)
+          return
+        }
+        const entry = state.turns.find((candidate) => candidate.turn === turn)
+        const order = entry === undefined ? turn : String(state.turns.indexOf(entry) + 1)
+        renderNote('正在载入第 ' + order + ' 轮…')
+        const loaded = await ensureTurnLoaded(turn)
+        if (seq !== state.selectSeq || !state.open) return
+        const late = sectionsFor(state.scope, turn)
+        if (late.prompts.length === 0 && late.answers.length === 0) {
+          renderNote(loaded ? '这一轮没有可显示的内容' : '这一轮还没载入出来', loaded ? null : turn)
+          return
+        }
+        renderSections(late)
       }
 
       function renderTurnList() {
@@ -779,19 +1016,74 @@ window.__ModuleLoader__.load({
           button.type = 'button'
           button.className = 'dshzr-turn'
           button.setAttribute('data-turn', entry.turn)
+          if (entry.unloaded) button.setAttribute('data-unloaded', '')
           const number = document.createElement('span')
           number.className = 'dshzr-turn-no'
           number.textContent = String(index + 1)
           const text = document.createElement('span')
           text.className = 'dshzr-turn-text'
-          text.textContent = entry.prompt === '' ? '第 ' + (index + 1) + ' 轮' : entry.prompt
-          button.title = entry.prompt === '' ? '第 ' + (index + 1) + ' 轮' : entry.prompt
+          const label = turnLabel(entry)
+          text.textContent = label
+          button.title = label
           button.appendChild(number)
           button.appendChild(text)
-          button.addEventListener('click', () => renderTurn(entry.turn))
+          button.addEventListener('click', () => {
+            void selectTurn(entry.turn)
+          })
           state.turnList.appendChild(button)
         })
         highlightTurn()
+        updateTurnsHead()
+      }
+
+      /** 异步补齐：用原生轮次条拿全量轮次，再借悬停预览补提问摘要。 */
+      async function refreshRail() {
+        const scope = state.scope
+        if (scope === null) return
+        const known = new Map(state.turns.map((entry) => [entry.turn, entry.prompt]))
+        const result = await railTurns(scope)
+        if (!state.open) return
+        state.rail = result.nav
+        if (result.turns.length === 0) return
+        for (const item of result.turns) {
+          const prompt = known.get(item.turn)
+          if (item.prompt === '' && typeof prompt === 'string' && prompt !== '') item.prompt = prompt
+        }
+        state.turns = result.turns
+        renderTurnList()
+        void enrichPrompts()
+      }
+
+      async function enrichPrompts() {
+        const nav = state.rail
+        if (nav === null) return
+        const seq = state.enrichSeq + 1
+        state.enrichSeq = seq
+        const deadline = Date.now() + 5000
+        for (const entry of state.turns) {
+          if (seq !== state.enrichSeq || !state.open) break
+          if (Date.now() > deadline) break
+          if (entry.prompt !== '') continue
+          const mark = marksOf(nav).find((candidate) => candidate.turn === entry.turn)
+          if (mark === undefined) continue
+          try {
+            mark.button.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))
+          } catch (error) {
+            break
+          }
+          await sleep(36)
+          const promptNode = nav.querySelector('[class*="previewPrompt"]')
+          if (promptNode === null) continue
+          const text = summarise(promptNode.textContent, 120)
+          if (text === '') continue
+          entry.prompt = text
+          updateTurnLabel(entry)
+        }
+        try {
+          nav.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }))
+        } catch (error) {
+          /* 清不掉预览也不影响使用 */
+        }
       }
 
       /** 左栏底部：先写好，再一键填入 DSH 的真实输入框（不自动发送）。 */
@@ -857,11 +1149,20 @@ window.__ModuleLoader__.load({
         if (state.open) close()
         state.prevFocus = document.activeElement
         state.zoom = readZoom()
+        state.selectSeq = 0
+        state.enrichSeq = 0
+        state.savedScrollTop = null
         const scope = scopeOf(message.body)
-        const turns = turnsIn(scope)
         state.scope = scope
-        state.turns = turns
-        state.entries = new Map(turns.map((entry) => [entry.turn, entry]))
+        state.rail = findRail(scope)
+        const domTurns = turnsIn(scope)
+        state.entries = new Map(domTurns.map((entry) => [entry.turn, entry.prompt]))
+        state.turns = domTurns.map((entry) => ({
+          turn: entry.turn,
+          prompt: entry.prompt,
+          unloaded: false,
+          button: null,
+        }))
 
         const backdrop = document.createElement('div')
         backdrop.className = 'dshzr-backdrop'
@@ -917,10 +1218,11 @@ window.__ModuleLoader__.load({
         aside.className = 'dshzr-turns'
         const asideHead = document.createElement('div')
         asideHead.className = 'dshzr-turns-head'
-        asideHead.textContent = '本会话 · ' + turns.length + ' 轮'
+        asideHead.textContent = '本会话 · ' + state.turns.length + ' 轮'
         const turnList = document.createElement('div')
         turnList.className = 'dshzr-turns-list'
         state.turnList = turnList
+        state.turnsHead = asideHead
         aside.appendChild(asideHead)
         aside.appendChild(turnList)
         aside.appendChild(buildCompose())
@@ -957,13 +1259,16 @@ window.__ModuleLoader__.load({
 
         renderTurnList()
         const initial = turnOfMessage(message)
-        if (initial !== null && state.entries.has(initial)) renderTurn(initial)
-        else if (turns.length > 0) renderTurn(turns[turns.length - 1].turn)
-        else {
-          // 拿不到轮次信息（DOM 变体）时退化成只渲染这一条回答
+        if (initial !== null) void selectTurn(initial)
+        else if (state.turns.length > 0) void selectTurn(state.turns[state.turns.length - 1].turn)
+        else if (message.body && message.body.isConnected) {
+          // 连轮次都取不到（DOM 变体）时退化成只渲染这一条回答
           content.appendChild(sanitizeClone(message.body.cloneNode(true)))
           applyZoom()
         }
+        window.setTimeout(() => {
+          void refreshRail()
+        }, 30)
 
         backdrop.addEventListener('mousedown', (event) => {
           if (event.target === backdrop) close()
@@ -993,7 +1298,7 @@ window.__ModuleLoader__.load({
           const nextIndex = event.key === 'ArrowDown' ? index + 1 : index - 1
           if (nextIndex < 0 || nextIndex >= state.turns.length) return
           event.preventDefault()
-          renderTurn(state.turns[nextIndex].turn)
+          void selectTurn(state.turns[nextIndex].turn)
         }
         document.addEventListener('keydown', onKeyDown, true)
         state.disposeKey = () => document.removeEventListener('keydown', onKeyDown, true)
@@ -1010,6 +1315,7 @@ window.__ModuleLoader__.load({
 
       return { open, close, isOpen: () => state.open }
     }
+
 
     /* ── 安装 ──────────────────────────────────────────────────────────── */
     function start() {
@@ -1066,6 +1372,7 @@ window.__ModuleLoader__.load({
           tailButtons: document.querySelectorAll('[data-dshzr-tail]').length,
           fab: document.querySelector('.dshzr-fab') !== null,
           panelTurns: document.querySelectorAll('.dshzr-turn').length,
+          railMarks: document.querySelectorAll('nav button[class*="mark"]').length,
           activeTurn: (() => {
             const active = document.querySelector('.dshzr-turn[data-active]')
             return active === null ? null : active.getAttribute('data-turn')
