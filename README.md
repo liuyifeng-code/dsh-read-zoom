@@ -1,120 +1,192 @@
-# dsh-read-zoom
+# dsh-read-zoom —— 放大阅读
 
-给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的每条回答加一个**固定位置**的「放大阅读」入口：点开是一个**两栏**的全屏阅读区 —— 右边是这一轮「提问 + 回答」的大字号正文，左边是本会话的轮次列表与一个随手写字的输入框。公式、表格、代码、图片都按原样保留。
+给 DSH 加一个「放大」入口：点开后把**整轮提问与回答**放进全屏两栏阅读区，用更大的字号重读；
+左栏列出本会话的每一轮（带提问摘要），可以随时跳转，还能顺手写下一句直接填进 DSH 输入框。
 
-> 动机很朴素：会话里的正文字号偏小，长时间读长回答（尤其带推导、公式、化学式的）眼睛累。DSH 设置里能调全局字号，但「只想把这一条看大一点」去改全局设置并不划算。
+公式（KaTeX）、表格、代码块、图片都保持原来的渲染结果，不会重新解析 Markdown。
+顺手做了三件跟公式有关的事：失败公式不再显示刺眼红字、超宽公式自动缩到放得下、数学与化学输出规约一键复制。
 
-## 它做了什么
+## 怎么用
 
-1. **回答操作行常驻按钮**：在每条回答底部的操作行里、`用量` 图标的左边插入一个「放大」按钮。位置固定，不跟随鼠标、不随滚动漂移；外观复用同排原生按钮的 class，深浅色主题自动一致。
-2. **两栏阅读浮层**（v0.3.0）：右边是整轮「提问 + 回答」的 DOM 克隆（KaTeX 公式、表格、代码块、图片都在），用 CSS `zoom` 整体等比放大，默认 140%，范围 80%–300%。
-3. **左栏轮次列表**（v0.3.0，v0.3.1 改为全量）：列出本会话**所有**轮次（带提问摘要），点任意一行或按 `↑` / `↓` 切换到那一轮的提问 + 回答，当前轮高亮。列表取自 DSH 原生轮次导航，所以还没加载进 DOM 的历史轮次也在；点这样的轮次会先让 DSH 补载历史（带「正在载入」提示，最多等 6 秒，失败可重试）。
-4. **左栏输入框**（v0.3.0）：写完点「填入输入框」把文字写进 DSH 的真实输入框，**只填入、不自动发送**，你确认后再按回车；`Ctrl`/`⌘ + Enter` 同效。这样看完一大段推导可以接着问，不用先退出浮层。
-5. **公式友好**（v0.3.0）：渲染失败的公式（DSH 会显示成红字 `.katex-error`）在浮层里降级为灰底等宽原文，不再刺眼；超宽的独立公式按可用宽度等比缩小，不再只能横向滚动；顶栏 `公式规约` 一键复制数学 / 化学的输出规约（9 条）。
-6. **不打扰主线程**（v0.3.2）：浮层打开期间不扫描时间线，滚动与输入不比原界面更重；打开/滚动/打字都不再因为整屏模糊或批量重排而卡顿。
-6. **顶部工具栏**：`A−` / `A+` 步进 10%、百分比数字（点击回到 140%）、`复制文字`、`公式规约`、`关闭`。
-7. **其它入口**：右下角常驻 `Aa` 小按钮、`Alt+Z` 快捷键；浮层内 `Ctrl`/`⌘` + 滚轮缩放、`Esc` 或点空白处关闭。
-8. 缩放比例记在 `localStorage`（键 `dsh-read-zoom:zoom`），下次打开沿用。
+| 入口 | 操作 |
+| --- | --- |
+| **操作行按钮（主入口）** | 每条回答底部那排图标里，在「用量」左边有一个展开图标按钮，点一下 |
+| 键盘 | `Alt+Z` 打开最近一条回答（视口内最靠下的一条） |
+| 常驻按钮 | 右下角圆形 `Aa`，点击效果同 `Alt+Z` |
 
-不替换 DSH 的 Markdown 渲染器、不改 `app.asar`、不新增依赖、不联网——纯粹在渲染结果上做 DOM 增强。
+> v0.2.1 起**移除了悬停药丸**：药丸会跟着消息和滚动漂移，干扰阅读。现在两个入口位置都是固定的。
 
-## 界面
+浮层里：
 
-操作行里的「放大」按钮（位于 `用量` 左边）：
+- **左栏轮次列表**（v0.3.0，v0.3.1 改为全量）：标题显示「本会话 · N 轮」，每一轮一行、显示提问摘要；
+  点任意一行切到那一轮的「提问 + 回答」，`↑` / `↓` 也能换轮，当前轮高亮。
+  列表取自 DSH 原生轮次导航，所以**历史更早、还没加载进 DOM 的轮次也在**；
+  点这样的轮次会先让 DSH 把历史补载进来（等待最多 6 秒，期间显示「正在载入第 N 轮…」）
+- **左栏底部输入框**（v0.3.0）：写完点「填入输入框」把文字写进 DSH 的真实输入框
+  （**只填入、不自动发送**，你确认后再按回车）；`Ctrl/Cmd+Enter` 同效；
+  写入失败会提示，并保留内容可直接「复制」粘贴
+- `A−` / `A+` 调字号（80%–300%，步进 10%），点中间的百分比回到 140%
+- `Ctrl/Cmd + 滚轮` 也能缩放
+- `复制文字` 复制**当前这一轮**的纯文本
+- `公式规约` 复制数学 / 化学的输出规约（9 条，可直接粘进 `AGENTS.md` 或发给模型）
+- `Esc` / 点空白处 / `关闭` 按钮退出；退出后焦点回到原来的位置
+- 缩放比例记在 `localStorage`（键 `dsh-read-zoom:zoom`），下次打开沿用
 
-![action row](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/action-row.png)
+## 公式与化学式（v0.3.0）
 
-两栏阅读区：左栏轮次列表 + 输入框，右边是这一轮的提问与回答（140%）：
-
-![panel with turn list](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/panel-turns.png)
-
-历史轮次还没加载进 DOM 时，点一下会先让 DSH 补载（v0.3.1）：
-
-![rail](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/panel-rail.png)
-
-放大到 200%：
-
-![panel 200](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/panel-200.png)
-
-在浮层里接着写下一句（只填入 DSH 输入框，不自动发送）：
-
-![compose](https://raw.githubusercontent.com/liuyifeng-code/dsh-read-zoom/main/assets/compose.png)
-
-> 截图来自本地渲染验证环境：用的是 DSH 前端自身的样式表与真实的 KaTeX 资源，字号、配色、公式排版与真实界面一致。
-
-## 数学 / 物理 / 化学
-
-插件不打包 KaTeX（DSH 自带 0.18.7），也不改它的渲染管线；它把「公式为什么红」的解法做成了可分发的东西：
+插件不自带 KaTeX，也不改 DSH 的渲染管线；它在阅读区里做了三处**只影响浮层**的增强：
 
 | 问题 | 处理 |
 | --- | --- |
-| 模型写了 KaTeX 不支持的宏（`\label`、`\ref`、行内 `\tag`、`\SI`、`\qty`、`\unit`、`\ce`、`\pu`） | DSH 会渲染成 `.katex-error` 红字；浮层里改成灰底等宽原文，可复制后改写 |
-| 行间公式太宽，DSH 原生只能横向滚动 | 浮层里按可用宽度等比缩小（下限 0.45em），整条公式看得全 |
-| 不知道怎么写才不红 | 顶栏「公式规约」一键复制 9 条规约（数学 8 条 + 化学 1 条），可粘进 `AGENTS.md` 或直接发给模型 |
+| 模型写了 KaTeX 不支持的宏（`\label`、`\SI`、`\ce` 等），DSH 会渲染成 `.katex-error` 红字 | 浮层里改成灰底等宽原文，不再刺眼；原文可复制后改写 |
+| 行间公式太宽，DSH 原生只能横向滚动 | 按可用宽度等比缩小字号（下限 0.45em），整条公式看得全 |
+| 用户不知道该怎么写公式才不红 | 顶栏「公式规约」一键复制 9 条规约（数学 8 条 + 化学 1 条） |
 
-规约是从 DSH 0.2.2 的真实 KaTeX 版本（0.18.7）逐条测出来的：52 个典型公式里 41 个直接通过，补 mhchem 后 44 个；剩下 8 个是 KaTeX 本身不支持，只能用替代写法。化学式建议用 `\mathrm{}` + `\rightarrow` / `\rightleftharpoons` / `\xrightarrow{\text{…}}` / `\downarrow`，不要用 `\ce{}` / `\pu{}` / `\SI{}` / `\qty{}` / `\unit{}`。
+规约本身是从 DSH 0.2.2 的真实 KaTeX 版本（0.18.7）逐条测出来的：52 个典型公式里 41 个直接通过，
+补 mhchem 后 44 个；剩下 8 个是 KaTeX 本身不支持，只能用替代写法。规约第 9 条专门写化学式与反应式
+（用 `\mathrm{}` + `\rightarrow` / `\rightleftharpoons` / `\xrightarrow{\text{…}}` / `\downarrow`，
+避免 `\ce{}` / `\pu{}` / `\SI{}` / `\qty{}` / `\unit{}`）。
 
-## 安装
+## 快捷键
 
-```bash
-# 从 npm（若已发布）
-dsh plugin add dsh-read-zoom
+| 快捷键 | 作用 |
+| --- | --- |
+| `Alt+Z` | 打开 / 关闭「最近一条回答」的放大阅读 |
+| `Alt+E` | 同上（v0.3.3 新加，键位更好按、也更好记） |
+| `Esc` | 关闭浮层 |
+| `↑` / `↓` | 在轮次列表里切换上一轮 / 下一轮 |
+| `Ctrl`（`⌘`）+ 滚轮 | 在浮层里缩小 / 放大 |
 
-# 或直接从 GitHub 源码安装
-dsh plugin add github:liuyifeng-code/dsh-read-zoom
-```
+> 在输入框、文本域或可编辑区域里打字时，`Alt+Z` / `Alt+E` 不会触发，避免和输入冲突。
 
-也可以在 DSH Web 的左侧栏「插件 → 添加插件」里粘贴仓库地址或本地目录。
+## 动效（v0.3.3）
 
-装好后**让页面重新加载一次**（`Ctrl+Shift+R`；不行就彻底退出 DSH 再启动），新按钮才会出现。
+打开时遮罩淡入、面板从下方 10px 轻微上浮并放到 100%；关闭时反向淡出，动画结束后才移除节点
+（关闭瞬间面板已经不再接收键盘/鼠标事件，`peek().overlayOpen` 也会立刻变 `false`）。
+动画只改 `opacity` 与 `transform`，由合成器处理，不触发布局与重绘，也不会把 v0.3.2 解决的卡顿带回来；
+系统开启「减少动态效果」时自动跳过动画。过渡时长 160–200ms。
 
-## 使用
+## 性能（v0.3.2）
 
-- 每条回答底部出现一排操作图标：复制 / 点赞 / 点踩 / 分支 / **放大** / 用量 / 时间——点「放大」即可。
-- 浮层里：左栏点选轮次或 `↑` / `↓` 换轮；底部写下一句后「填入输入框」；右上角 `A−` / `A+` / 百分比复位 / `复制文字` / `公式规约` / `关闭`。
-- 键盘：`Alt+Z` 打开最近一条回答，`Esc` 关闭，`Ctrl`/`⌘ + 滚轮` 缩放。
+v0.3.1 在真实会话里「打开 / 滚动 / 打字都一卡一卡」，v0.3.2 针对主线程与合成开销做了四处优化：
 
-## 兼容性
+| 改动 | 为什么 |
+| --- | --- |
+| 去掉遮罩层的 `backdrop-filter: blur(2px)` | 整屏模糊会让 Chromium 在每次重绘（滚动、输入、光标闪烁）都重新采样并模糊背后的大段聊天 DOM，是卡顿的最大来源；换成纯半透明遮罩 |
+| 浮层内公式只保留可视的那一半 DOM | 每个 KaTeX 公式都有 MathML + HTML 两份，克隆时删掉 `.katex-mathml`，公式节点数减半 |
+| 批量测量再批量写样式 | 「超宽公式缩放」原来逐个公式「读宽度 → 写字号」，每次都触发重排；现在一次清样式、一次批量量宽、一次批量写 |
+| 操作行按钮的同步改为「空闲时 + 浮层打开时不扫」 | 原来整页 `MutationObserver` 80ms 去抖后遍历所有 `[data-turn-tail]`，流式输出时与输入抢主线程；现在用 `requestIdleCallback`（600ms 兜底），浮层打开期间完全不扫，关闭后补一次 |
+| 提问摘要按需补 | 原来打开时对**每一轮**派发 `pointermove` 去借预览，轮次多时会把主线程占满；现在只补左栏里看得见的那几行，滚动时再补 |
 
-- 在 DSH 0.2.2-rc.1（桌面版，Web 前端）上开发与验证。
-- 插件纯前端（client 半边），Host 半边是空实现：不注册服务、不改路由、不加依赖，所以版本升级后失效的最大代价是「按钮不出现」，不会影响会话本身。
-- 定位依赖 DSH 前端的几处稳定标记：操作行根节点 `data-turn-tail`、操作行内的 `_endInfo` 容器、时间线的 `[data-chat-turn]` / `[data-conversation-session]`、轮次导航 `nav[aria-label="轮次导航"]` 里的 `button[class*="mark"]`；缺失时会逐级退化成「插在操作行末尾」「只列出已加载的轮次」「只显示单条回答」，不影响其它功能。
+另外给面板加了 `contain: layout paint`、滚动容器加 `will-change: scroll-position`，
+减少滚动时的重排范围。
+
+## 被截断的轮次（v0.3.4）
+
+如果某一轮只发出了提问、回答在生成过程中被中断（DSH 里会显示「已停止」），放大面板不再只给你一个孤零零的提问：
+「回答」位置会显示一个虚线提示块——**输出被截断，无回答**，并说明「DSH 里这一轮只有提问——回答在生成过程中被中断」。
+
+判定依据：该轮的行里出现 `[class*="_stopped"]`（DSH 的「已停止」状态块）就判定为截断；没有这个标记但确实没有回答正文时，
+退化成中性文案「这一轮没有回答内容」。「已停止」状态块本身不会被复制进正文（它只是状态，不是回答）。
+
+另外 v0.3.4 修了「点被截断那一轮自己的操作行按钮会打开上一轮」的定位问题：这类轮次没有可定位的回答节点，
+现在会直接按轮次打开，而不是回退到最近的旧回答。
+
+## 已知细节
+
+- 操作行按钮插在 `…_endInfo`（用量 + 时长那一栏）的最前面，所以顺序是
+  `复制 / 点赞 / 分支 / **[放大] / 用量 / 时长`。
+- 只有「以回答结尾」的轮次操作行才常显（DSH 的 `data-actions-reveal="always"`）；
+  中间过程轮次的操作行本来就悬停才出现，放大按钮跟着一起出现。
+- 流式生成过程中整块会重渲染，插件用 MutationObserver 把按钮补回去（v0.3.2 起改为空闲时扫描，
+  浮层打开期间不扫，关闭后补一次）。
+- 版本号写在 DOM 上，方便确认加载的是哪一版：按钮带 `data-dshzr-version="0.3.4"`，
+  右下角 `Aa` 的鼠标提示里也带版本号。
+- **轮次列表的数据源**（v0.3.1）：DSH 的聊天时间线是虚拟滚动的，历史轮次不一定在 DOM 里，
+  所以列表改读原生轮次导航（`nav[aria-label="轮次导航"]` 里的 `button.SNx2jG_mark`），
+  用 `aria-label`（「跳转到第 N 轮」/「加载并跳转到第 N 轮」）解析轮次号；
+  提问摘要优先用 DOM 里的提问原文，缺的用轮次导航的悬停预览异步补，补不到就显示「第 N 轮」。
+- **空「回答」已修**（v0.3.1）：渲染时跳过 `data-turn-process-hidden`（折叠的思考过程）、
+  `hidden` 占位行、`turn-tail` 行和空行；同一轮的多个行合并成「提问」「回答」两段，
+  每段只出现一个标签。关闭浮层时会把主聊天区原本的滚动位置还原。
+- **回答归属按「会话 + 轮次」判定**（v0.2.2）：先锁定当前可见的会话容器
+  `[data-conversation-session]`，再在容器内按 `[data-chat-turn]` 匹配同一轮次，
+  不按整页文档顺序取「上一条回答」。切换会话时旧会话 DOM 可能还留在文档里，
+  早期版本因此在切换后放大出上一个会话的回答。
+
+## 安装（本地插件）
+
+已经安装进 `desktop` profile，采用宿主插件管理器的方式登记：
+
+1. 插件目录：`C:\Users\user\.dsh\profiles\desktop\local-plugins\dsh-read-zoom`
+2. `C:\Users\user\.dsh\profiles\desktop\package.json` 的 `dependencies` 有
+   `"dsh-read-zoom": "link:C:/Users/user/.dsh/profiles/desktop/local-plugins/dsh-read-zoom"`，
+   `dsh.profile.bundles` 数组里有 `"dsh-read-zoom"`
+3. 安装/更新用 `plugin_manager install_bundle`（**不要手改 profile 的 package.json**：
+   运行中的 DSH 会用它内存里的 bundles 列表覆盖手改内容）
+4. **更新客户端代码后必须让窗口重新加载**：`Ctrl+Shift+R` 强刷；若仍是旧行为，
+   彻底退出 DSH（窗口关闭后确认进程结束）再启动
 
 ## 卸载
 
-在「插件」页移除，或：
-
-```bash
-dsh plugin remove dsh-read-zoom
 ```
+dsh plugin --profile desktop remove dsh-read-zoom
+```
+
+或在 GUI 插件页里停用/移除，然后重启 DSH。
+
+## 实现要点
+
+- 纯 DOM 客户端插件（`window.__ModuleLoader__.load`），不依赖 React、不注册 slot、不改 app.asar
+- 消息识别不写死 hash 类名：先用 `[class*="_body"]` + 父级 `[class*="_root"]` 锁定消息容器，
+  再要求容器内存在 `[data-text-interaction-source][class*="markdown"]`
+- 操作行定位同样不写死 hash：`[data-turn-tail]` → `div[class*="_actions"]` → `[class*="_endInfo"]`，
+  取 `_endInfo` 第一个子节点前插入（找不到 `_endInfo` 就退化为行尾）；
+  按钮 class 直接复制同排原生按钮的 class，尺寸/配色/暗色主题自动一致
+- 浮层内容 = 消息 body 的 `cloneNode(true)`，克隆时移除 `id` / 脚本 / 交互属性，
+  所以 KaTeX 的排版与字体完全沿用真实渲染结果
+- 缩放用 CSS `zoom`（Chromium 支持），整块等比放大，行内公式和行间公式一起变
+- 样式走 DSH 设计 token（`--dsw-alias-*`），亮/暗色主题自动跟随
 
 ## 调试
 
-浏览器控制台：
+浏览器控制台（DSH 的 DevTools）里：
 
 ```js
-window.__DSH_READ_ZOOM__          // { version, openLast(), close(), messages(), peek() }
-window.__DSH_READ_ZOOM__.peek()   // { version, overlayOpen, tailButtons, fab, panelTurns, activeTurn, compose }
-window.__DSHZR_LOG__              // 最近 200 条内部日志
+window.__DSH_READ_ZOOM__.peek()      // { version, overlayOpen, tailButtons, fab, panelTurns, activeTurn, compose }
+window.__DSH_READ_ZOOM__.openLast()  // 直接打开最近一条
+window.__DSH_READ_ZOOM__.messages()  // 识别到的消息容器数量
+window.__DSHZR_LOG__                 // 最近 200 条内部事件日志
 ```
 
-`peek().version` 可以确认当前加载的是哪个版本；`tailButtons` 是已插入的按钮数量；`panelTurns` 是左栏列出的轮数；`railMarks` 是原生轮次导航里找到的刻度数量（0 表示没找到，此时列表退化为「只列已加载轮次」）。
+如果放大按钮没出现：
+
+1. 先看 `peek().version` —— 不是 `0.3.4` 说明窗口加载的还是旧代码（强刷或重启 DSH）；
+2. 再看 `peek().railMarks` —— 为 0 说明没找到 DSH 的轮次导航（会话里只有 1 轮时它本来就不渲染），
+   这时轮次列表会退化成「只列 DOM 里已有的轮次」；
+2. 再看 `messages()` 是否为 0 —— 为 0 说明 DSH 升级后改了消息 DOM 结构，要更新消息识别逻辑；
+3. 再看 `peek().tailButtons` 是否为 0 —— 为 0 说明操作行结构变了（`_actions`/`_endInfo` 找不到），
+   或者该轮次的操作行还没渲染出来（流式生成中属正常）。
 
 ## 更新记录
 
-- **0.3.3**：打开 / 关闭换成 160–200ms 的淡入淡出 + 轻微上浮过渡（只动 opacity/transform，不触发布局，系统开启「减少动态效果」时跳过）；新增 Alt+E 快捷键（与 Alt+Z 等价，在输入框里不触发）。
-- **0.3.2**：性能 — 去掉遮罩层的整屏 `backdrop-filter: blur()`（滚动/输入时每次重绘都要重新模糊背后整页聊天 DOM，是「一卡一卡」的主因）；浮层里删掉每个公式的 MathML 副本；超宽公式改「一次量完再一次写样式」；操作行按钮的 `MutationObserver` 改为空闲时扫描、浮层打开期间不扫；左栏提问摘要只补可见行，滚动时再补。面板加 `contain: layout paint`。
-- **0.3.1**：修两个实测问题 —— ① 轮次列表只显示已加载的少数几轮（DSH 时间线虚拟滚动，历史轮次不在 DOM 里），现在改读 DSH 原生轮次导航列出全部轮次，点未加载轮次会等 DSH 补载历史（带提示与重试）；② 右栏出现多个空「回答」（把折叠思考、隐藏占位、`turn-tail` 行也克隆了），现在按行类型过滤、每轮合并成「提问」「回答」两段。关闭浮层时还原主聊天区滚动位置。
-- **0.3.0**：两栏阅读区 —— 左栏轮次列表（点击 / `↑↓` 切换提问+回答）+ 底部输入框（只填入、不发送）；公式相关增强（失败公式降级、超宽公式缩放、`公式规约` 一键复制）。
-- **0.2.2**：修「切换会话后点放大，面板里是上一个会话的回答」—— 先按会话容器 `data-conversation-session`、再按轮次 `data-chat-turn` 定位。
-- **0.2.1**：移除悬停药丸（会跟消息/滚动漂移），入口改为操作行常驻按钮。
+- **0.3.4**：只发出提问、回答被截断（已停止）的轮次，在「回答」位置显式显示「输出被截断，无回答」；修「点这一轮自己的放大按钮却打开上一轮」的定位问题。
+- **0.3.3**：打开 / 关闭加了过渡（遮罩淡入淡出 + 面板轻微上浮，160–200ms，只动 opacity/transform，系统开启「减少动态效果」时跳过）；新增 Alt+E 快捷键（与 Alt+Z 等价）。
+- **0.3.1**：修两个实测问题。① 轮次列表只显示 2 轮 —— 因为 DSH 聊天时间线是虚拟滚动的，
+  历史轮次没进 DOM；现在改读 DSH 原生轮次导航，列出**全部**轮次，点未加载的轮次会等 DSH
+  补载历史（最多 6 秒，带「正在载入」提示和失败重试）。② 右栏出现多个空「回答」——
+  之前把折叠的思考过程行、`hidden` 占位行、`turn-tail` 行也克隆进来了；现在按行类型过滤，
+  同一轮的提问/回答各合并成一段。另外：关闭浮层会还原主聊天区的滚动位置，`peek()` 增加 `railMarks`。
+- **0.3.0**：浮层改成两栏 —— 左栏是本会话的轮次列表（带提问摘要，点击 / `↑↓` 切换「提问 + 回答」，
+  内容按 `[data-chat-turn]` 重新取，不再只克隆打开时那一条）+ 底部输入框（一键填入 DSH 真实输入框，
+  **只填不发**）。顺带把公式相关的改进打包进来：失败公式降级成灰底等宽原文、超宽公式等比缩小、
+  顶栏「公式规约」一键复制数学/化学规约（第 9 条专讲化学式写法）。浮层高度固定为 `min(92vh,940px)`，
+  阅读区更稳；填入时用 `focus({preventScroll:true})` 并还原滚动，避免整页被滚走。
+- **0.2.2**：修「切换会话后点放大，面板里是上一个会话的回答」。原因是旧实现按整页文档顺序
+  取「操作行之前最近的一条回答」，切换会话时旧会话的 DOM 还在文档里，于是取错了。
+  现在先锁定当前会话容器（`data-conversation-session`），再按轮次（`data-chat-turn`）匹配；
+  操作行不属于当前会话时（切换瞬间的残留行）直接退化为「当前会话最后一条回答」。
+- **0.2.1**：移除悬停药丸（会跟着消息/滚动漂移），入口改为操作行常驻按钮。
 - **0.2.0**：放大按钮常驻到每条回答操作行的「用量」左边。
 - **0.1.0**：首个版本，悬停药丸 + 右下角 `Aa` + `Alt+Z`。
 
-## English
-
-**dsh-read-zoom** adds a fixed "enlarge" button to every answer's action row in DeepSeek Harness and opens a two-pane full-screen reading view. The right pane is a clone of that turn's prompt and answer, so KaTeX math, tables, code blocks, Mermaid diagrams and images keep their exact rendering, scaled with CSS `zoom` (80%–300%, default 140%). The left pane lists **every** turn in the current session (read from DSH's native turn navigator, including turns that are not loaded into the DOM yet — clicking one asks DSH to backfill its history) with prompt summaries, and lets you compose the next message — it is **written into DSH's real composer but never auto-sent**. Formula helpers: failed KaTeX renders fall back to grey monospace source instead of red text, overly wide display math is scaled down to fit, and a `公式规约` button copies a tested set of math/chemistry output rules. No renderer replacement, no `app.asar` patching, no dependencies, no network access.
-
-## License
-
-MIT © 2026 liuyifeng-code

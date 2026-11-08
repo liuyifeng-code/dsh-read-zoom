@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
     // v0.3.2：操作行按钮的同步函数（安装时赋值），浮层关闭后用它补一次，避免依赖整页 MutationObserver。
     let actionSync = null
     // 版本号：DOM 上会写进 data-dshzr-version，便于在真实 DSH 里确认加载的是哪一版。
-    const VERSION = '0.3.3'
+    const VERSION = '0.3.4'
     // 每轮回答底部的操作行所在容器（DSH chat 的 TurnTailNodeView 带这个属性）。
     const TAIL_ATTR = 'data-turn-tail'
     // 16px 对角双箭头（放大/展开），药丸与操作行按钮共用；stroke 用 currentColor 跟随主题。
@@ -179,6 +179,12 @@ window.__ModuleLoader__.load({
       '.dshzr-note button{margin-left:10px;height:26px;padding:0 10px;border-radius:8px;cursor:pointer;',
       'border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));background:transparent;',
       'color:var(--dsw-alias-label-primary,#191919);font:500 12px/1 var(--dsw-font-family,-apple-system,sans-serif)}',
+      '.dshzr-truncated{display:flex;gap:8px;align-items:flex-start;margin:4px 0 0;padding:12px 14px;',
+      'border-radius:10px;border:1px dashed var(--dsw-alias-border-l3,rgba(0,0,0,.2));',
+      'background:var(--dsw-alias-bg-layer-1,#fbfbfc);color:var(--dsw-alias-label-secondary,#6b6b71);',
+      'font:400 13px/1.7 var(--dsw-font-family,-apple-system,sans-serif)}',
+      '.dshzr-truncated .dshzr-truncated-icon{flex:none;font-size:13px;line-height:1.7}',
+      '.dshzr-truncated b{display:block;font-weight:600;color:var(--dsw-alias-label-primary,#191919)}',
       '.dshzr-turn[data-unloaded] .dshzr-turn-text{opacity:.72}',
       '.dshzr-head{display:flex;align-items:center;gap:6px;flex:none;padding:10px 12px 10px 16px;',
       'border-bottom:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08))}',
@@ -422,6 +428,9 @@ window.__ModuleLoader__.load({
           if (message !== null) found = message
         }
         if (found !== null) return found
+        // 这一轮在 DOM 里没有可定位的回答节点（典型：输出被截断/已停止，只剩提问）。
+        // 交给调用方按轮次打开，避免回退到「上一轮的回答」而张冠李戴。
+        return null
       }
       let fallback = null
       for (const message of settledMessages(scope)) {
@@ -458,7 +467,7 @@ window.__ModuleLoader__.load({
      * 幂等：已经在本行的按钮不会重复插入。
      * 优先插在 _endInfo 的首个子节点前（=「用量」左边）；拿不到 _endInfo 时退化为行尾。
      */
-    function installActionButtons(openFor) {
+    function installActionButtons(openFor, openTurnFor) {
       const buttons = new Set()
 
       function ensure() {
@@ -479,13 +488,17 @@ window.__ModuleLoader__.load({
             button.addEventListener('click', (event) => {
               event.preventDefault()
               event.stopPropagation()
+              const item = itemOf(tail)
+              const turn = item === null ? null : item.getAttribute(TURN_ATTR)
               const message = messageForTail(tail)
-              if (message === null) {
-                dbg('tailClick', 'no-message')
+              dbg('tailClick', 'open', 'turn=' + (turn === null ? '?' : turn), 'message=' + (message === null ? 'none' : 'found'))
+              if (message !== null) {
+                openFor(message)
                 return
               }
-              dbg('tailClick', 'open', 'turn=' + (itemOf(tail) === null ? '?' : itemOf(tail).getAttribute(TURN_ATTR)))
-              openFor(message)
+              // 这一轮只有提问（输出被截断/已停止），没有可定位的回答节点：
+              // 直接按轮次打开，面板里会给出「输出被截断，无回答」的说明。
+              if (turn !== null && typeof openTurnFor === 'function') openTurnFor(scopeOf(tail), turn)
             })
             if (found.endInfo === null) endInfo.appendChild(button)
             else endInfo.insertBefore(button, endInfo.firstElementChild)
@@ -660,10 +673,21 @@ window.__ModuleLoader__.load({
     function sectionsFor(scope, turn) {
       const prompts = []
       const answers = []
+      let stopped = false
+      let failure = ''
       for (const row of turnRows(scope, turn)) {
         const kind = row.getAttribute(FLOW_KIND_ATTR) || ''
+        // DSH 对被中断/截断的回答会渲染一个 .xMeOpW_stopped（已停止）状态块；
+        // 这一块本身不是正文，去掉并在缺正文时给出明确提示。
+        if (row.querySelector('[class*="_stopped"],[class*="stopped"]') !== null) stopped = true
+        if (kind === 'turn-error' || kind.indexOf('error') >= 0) {
+          const errorText = textOf(row).trim()
+          if (errorText !== '') failure = errorText
+        }
         const clone = row.cloneNode(true)
-        for (const extra of clone.querySelectorAll('[data-dshzr-tail],.dshzr-tail-btn')) extra.remove()
+        for (const extra of clone.querySelectorAll('[data-dshzr-tail],.dshzr-tail-btn,[class*="_stopped"],[class*="stopped"]')) {
+          extra.remove()
+        }
         const clean = sanitizeClone(clone)
         const text = textOf(clean).trim()
         const media = clean.querySelector('.katex,img,svg,table,video,canvas') !== null
@@ -671,7 +695,7 @@ window.__ModuleLoader__.load({
         if (kind.indexOf('user') === 0 || kind === 'steering') prompts.push(clean)
         else answers.push(clean)
       }
-      return { prompts, answers }
+      return { prompts, answers, stopped, failure }
     }
 
     /** DOM 里已经渲染出来的轮次（打开面板时先用它，异步再补全）。 */
@@ -1034,6 +1058,30 @@ window.__ModuleLoader__.load({
         }
         add('提问', 'user', sections.prompts)
         add('回答', 'answer', sections.answers)
+        if (sections.answers.length === 0 && sections.prompts.length > 0) {
+          // 只留下提问的轮次：多半是输出被截断（用户点了停止 / 进程中断），
+          // 明确写出来，避免误以为是插件少抓了内容。
+          const box = document.createElement('div')
+          box.className = 'dshzr-truncated'
+          box.setAttribute('data-dshzr-truncated', sections.stopped ? 'stopped' : 'empty')
+          const icon = document.createElement('span')
+          icon.className = 'dshzr-truncated-icon'
+          icon.textContent = '⚠'
+          const text = document.createElement('div')
+          const head = document.createElement('b')
+          head.textContent = sections.stopped ? '输出被截断，无回答' : '这一轮没有回答内容'
+          text.appendChild(head)
+          const detail = document.createElement('span')
+          detail.textContent = sections.stopped
+            ? 'DSH 里这一轮只有提问——回答在生成过程中被中断（界面显示「已停止」），所以没有正文可放大。'
+            : sections.failure !== ''
+              ? summarise(sections.failure, 160)
+              : 'DSH 里这一轮只渲染出提问，没有可显示的回答正文（可能输出被截断或回答为空）。'
+          text.appendChild(detail)
+          box.appendChild(icon)
+          box.appendChild(text)
+          content.appendChild(box)
+        }
         if (state.scroller !== null) state.scroller.scrollTop = 0
         applyZoom()
       }
@@ -1237,8 +1285,12 @@ window.__ModuleLoader__.load({
         return box
       }
 
-      function open(message) {
-        if (!message || !message.body || !message.body.isConnected) return false
+      function open(message, options) {
+        const opt = options === undefined || options === null ? {} : options
+        const usable = message !== undefined && message !== null && message.body !== undefined && message.body !== null && message.body.isConnected === true
+        if (!usable && opt.turn === undefined) return false
+        const scopeHint = opt.scope !== undefined ? opt.scope : usable ? scopeOf(message.body) : null
+        if (scopeHint === null) return false
         if (state.open) close()
         // 若上一个浮层还在跑退出动画，直接摘掉，避免两层遮罩叠着闪一下
         document.querySelectorAll('.dshzr-backdrop').forEach((node) => node.remove())
@@ -1247,7 +1299,7 @@ window.__ModuleLoader__.load({
         state.selectSeq = 0
         state.enrichSeq = 0
         state.savedScrollTop = null
-        const scope = scopeOf(message.body)
+        const scope = scopeHint
         state.scope = scope
         state.rail = findRail(scope)
         const domTurns = turnsIn(scope)
@@ -1296,8 +1348,8 @@ window.__ModuleLoader__.load({
         zoomLabel.addEventListener('click', () => setZoom(DEFAULT_ZOOM))
         closeButton.addEventListener('click', () => close())
         copy.addEventListener('click', () => {
-          const source = state.content === null ? message.body : state.content
-          const text = textOf(source)
+          const source = state.content === null ? (usable ? message.body : null) : state.content
+          const text = source === null ? '' : textOf(source)
           if (text === '') {
             toast('这一轮没有可复制的文字')
             return
@@ -1371,10 +1423,10 @@ window.__ModuleLoader__.load({
         document.body.classList.add('dshzr-noscroll')
 
         renderTurnList()
-        const initial = turnOfMessage(message)
+        const initial = usable ? turnOfMessage(message) : opt.turn === undefined ? null : String(opt.turn)
         if (initial !== null) void selectTurn(initial)
         else if (state.turns.length > 0) void selectTurn(state.turns[state.turns.length - 1].turn)
-        else if (message.body && message.body.isConnected) {
+        else if (usable) {
           // 连轮次都取不到（DOM 变体）时退化成只渲染这一条回答
           content.appendChild(sanitizeClone(message.body.cloneNode(true)))
           applyZoom()
@@ -1426,7 +1478,12 @@ window.__ModuleLoader__.load({
         return true
       }
 
-      return { open, close, isOpen: () => state.open }
+      return {
+        open,
+        openTurn: (scope, turn) => open(null, { scope, turn }),
+        close,
+        isOpen: () => state.open,
+      }
     }
 
 
@@ -1442,8 +1499,12 @@ window.__ModuleLoader__.load({
         overlay.open(message)
       }
 
+      function openForTurn(scope, turn) {
+        overlay.openTurn(scope === null ? activeScope() : scope, turn)
+      }
+
       // 主入口：回答底部操作行里、紧挨「用量」左边的放大按钮（位置固定）
-      disposers.push(installActionButtons(openFor))
+      disposers.push(installActionButtons(openFor, openForTurn))
 
       // 右下角常驻按钮（固定位置，不随鼠标漂移）+ Alt+Z
       const fab = document.createElement('button')
