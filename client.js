@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
     // v0.3.2：操作行按钮的同步函数（安装时赋值），浮层关闭后用它补一次，避免依赖整页 MutationObserver。
     let actionSync = null
     // 版本号：DOM 上会写进 data-dshzr-version，便于在真实 DSH 里确认加载的是哪一版。
-    const VERSION = '0.3.4'
+    const VERSION = '0.3.8'
     // 每轮回答底部的操作行所在容器（DSH chat 的 TurnTailNodeView 带这个属性）。
     const TAIL_ATTR = 'data-turn-tail'
     // 16px 对角双箭头（放大/展开），药丸与操作行按钮共用；stroke 用 currentColor 跟随主题。
@@ -207,7 +207,11 @@ window.__ModuleLoader__.load({
       'padding:20px 28px 40px;box-sizing:border-box}',
       /* v0.3.2：单轮内容整体做布局/绘制隔离，减少滚动时的重排范围 */
       '.dshzr-content .dshzr-item{contain:layout paint}',
-      '.dshzr-content{zoom:1.4;transform-origin:top left}',
+      '.dshzr-content{zoom:1.4;transform-origin:top left;font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-primary)}',
+      /* v0.3.7：克隆进来的回答可能背着宿主的入场动画（opacity:0 起步）或折叠态，
+         一旦动画不跑就永远停在透明状态——这正是「有字数、看不见」的常见原因。
+         阅读区不需要动画，直接强制可见。 */
+      '.dshzr-content *{animation:none!important;transition:none!important;opacity:1!important;visibility:visible!important}',
       '.dshzr-content .katex-display{overflow-x:auto;overflow-y:hidden;max-width:100%;padding:2px 0}',
       '.dshzr-content .katex-display > .katex{display:inline-block;transform-origin:left center}',
       '.dshzr-content .katex-error{color:var(--dsw-alias-label-secondary,#6b6b71)!important;',
@@ -654,22 +658,57 @@ window.__ModuleLoader__.load({
       return { nav, turns }
     }
 
-    /** 一轮实际渲染出来的行（跳过隐藏行、turn-tail、嵌套行）。 */
+    /**
+     * 一轮实际渲染出来的行。
+     * 真实 DSH 里回答可能被包在一个同样带 data-chat-turn 的容器里（组行套内容行），
+     * 只取「最内层」的那些行，避免外层包裹把内容行当成 nested 全部丢掉，也避免内容重复。
+     */
     function turnRows(scope, turn) {
-      const rows = []
-      if (scope === null || typeof scope.querySelectorAll !== 'function') return rows
+      const found = []
+      if (scope === null || typeof scope.querySelectorAll !== 'function') return found
       for (const node of scope.querySelectorAll('[' + TURN_ATTR + '="' + turn + '"]')) {
         if (node.getAttribute(FLOW_KIND_ATTR) === 'turn-tail') continue
         if (node.hasAttribute('hidden') || node.hasAttribute('data-turn-process-hidden')) continue
-        const parent = node.parentElement
-        const nested = parent === null ? null : parent.closest('[' + TURN_ATTR + ']')
-        if (nested !== null && scope.contains(nested)) continue
-        rows.push(node)
+        found.push(node)
       }
+      const rows = found.filter((node) => !found.some((other) => other !== node && node.contains(other)))
+      if (rows.length === 0) return found
       return rows
     }
 
+    /**
+     * 一行里真正承载回答正文的容器（DSH 的 <div class="…_root"><div class="…_body">…</div></div>）。
+     * 克隆整行时，行内的图标/操作条/虚拟定位都会一起搬进浮层；只取正文容器更稳，
+     * 也不会因为行被折叠/裁剪而把正文一起丢掉。
+     */
+    function bodiesOf(row) {
+      const bodies = []
+      const all = [row].concat(Array.prototype.slice.call(row.querySelectorAll('div[class]')))
+      for (const node of all) {
+        if (node === row && !tokensOf(node).some(isBodyToken)) continue
+        if (!tokensOf(node).some(isBodyToken)) continue
+        const parent = node.parentElement
+        if (parent !== null && tokensOf(parent).some(isRootToken)) {
+          bodies.push(parent)
+          continue
+        }
+        bodies.push(node)
+      }
+      // 去掉「已经被另一个 body 包住」的重复项
+      return bodies.filter((node) => !bodies.some((other) => other !== node && other.contains(node)))
+    }
+
     /** 一轮的「提问」「回答」片段（已清理、已剔除空行）。 */
+    /**
+     * 被中断的轮次在真实 DOM 里可能只是「已停止」一行小字，
+     * class 名里不一定带 stop 字样 —— 所以除了看标记，还要看这行是不是只有一句「已停止」。
+     */
+    function isStoppedRow(row) {
+      if (row.querySelector('[class*="stop"],[data-stopped],[aria-label*="停止"]') !== null) return true
+      const text = textOf(row).replace(/\s+/g, '')
+      return text !== '' && text.length <= 12 && /^(已停止|已中断|已终止|stopped)/i.test(text)
+    }
+
     function sectionsFor(scope, turn) {
       const prompts = []
       const answers = []
@@ -679,23 +718,118 @@ window.__ModuleLoader__.load({
         const kind = row.getAttribute(FLOW_KIND_ATTR) || ''
         // DSH 对被中断/截断的回答会渲染一个 .xMeOpW_stopped（已停止）状态块；
         // 这一块本身不是正文，去掉并在缺正文时给出明确提示。
-        if (row.querySelector('[class*="_stopped"],[class*="stopped"]') !== null) stopped = true
+        const stoppedRow = isStoppedRow(row)
+        if (stoppedRow) stopped = true
         if (kind === 'turn-error' || kind.indexOf('error') >= 0) {
           const errorText = textOf(row).trim()
           if (errorText !== '') failure = errorText
         }
-        const clone = row.cloneNode(true)
-        for (const extra of clone.querySelectorAll('[data-dshzr-tail],.dshzr-tail-btn,[class*="_stopped"],[class*="stopped"]')) {
-          extra.remove()
+        const isPrompt = kind.indexOf('user') === 0 || kind === 'steering'
+        const targets = isPrompt ? [row] : (bodiesOf(row).length > 0 ? bodiesOf(row) : [row])
+        // 只有「已停止」状态、没有正文的行不算回答，交给截断提示去说明。
+        if (stoppedRow && !isPrompt) continue
+        for (const target of targets) {
+          const clone = target.cloneNode(true)
+          for (const extra of clone.querySelectorAll('[data-dshzr-tail],.dshzr-tail-btn,[class*="_stopped"]')) {
+            extra.remove()
+          }
+          const clean = sanitizeClone(clone)
+          const text = textOf(clean).trim()
+          const media = clean.querySelector('.katex,img,svg,table,video,canvas') !== null
+          if (text === '' && !media) continue
+          if (isPrompt) prompts.push(clean)
+          else answers.push(clean)
         }
-        const clean = sanitizeClone(clone)
-        const text = textOf(clean).trim()
-        const media = clean.querySelector('.katex,img,svg,table,video,canvas') !== null
-        if (text === '' && !media) continue
-        if (kind.indexOf('user') === 0 || kind === 'steering') prompts.push(clean)
-        else answers.push(clean)
       }
       return { prompts, answers, stopped, failure }
+    }
+
+    /**
+     * 结构诊断：只统计数量与长度，不搬运正文内容。
+     * 目的：真实 DSH 里如果「有提问没回答」，把 DOM 结构暴露出来定位，而不是靠猜。
+     */
+    function probeTurn(scope, turn) {
+      const info = { turn: String(turn), rows: 0, kinds: [], bodies: 0, mdHosts: 0, prompts: 0, answers: 0, answerChars: 0, stopped: false, hiddenInAnswers: 0 }
+      try {
+        const rows = turnRows(scope, turn)
+        const sections = sectionsFor(scope, turn)
+        info.rows = rows.length
+        info.kinds = rows.map((row) => row.getAttribute(FLOW_KIND_ATTR) || '?').slice(0, 10)
+        info.bodies = rows.reduce((sum, row) => sum + bodiesOf(row).length, 0)
+        if (scope !== null && typeof scope.querySelectorAll === 'function') {
+          info.mdHosts = scope.querySelectorAll('[' + TURN_ATTR + '="' + String(turn) + '"] [' + HOST_ATTR + ']').length
+        }
+        info.prompts = sections.prompts.length
+        info.answers = sections.answers.length
+        info.answerChars = sections.answers.reduce((sum, node) => sum + textOf(node).length, 0)
+        info.hiddenInAnswers = sections.answers.reduce((sum, node) => sum + node.querySelectorAll('[hidden],[style*="display:none"],[style*="display: none"]').length, 0)
+        info.stopped = sections.stopped
+      } catch (error) {
+        info.error = String(error && error.message ? error.message : error)
+      }
+      return info
+    }
+
+    /** 渲染现场：把当前面板里「回答」块的 HTML 片段与几何信息带出来（只 POST 到本机）。 */
+    function probeRender() {
+      const out = { items: [], answer: null }
+      for (const item of Array.prototype.slice.call(document.querySelectorAll('.dshzr-item'))) {
+        const body = item.querySelector('.dshzr-item-body')
+        const rect = item.getBoundingClientRect()
+        const first = body === null ? null : body.firstElementChild
+        const style = first === null ? null : getComputedStyle(first)
+        out.items.push({
+          kind: item.getAttribute('data-kind'),
+          h: Math.round(rect.height),
+          textLen: item.textContent.length,
+          firstTag: first === null ? '' : first.tagName + '.' + String(first.className).slice(0, 40),
+          firstH: first === null ? 0 : Math.round(first.getBoundingClientRect().height),
+          display: style === null ? '' : style.display,
+          visibility: style === null ? '' : style.visibility,
+          opacity: style === null ? '' : style.opacity,
+          color: style === null ? '' : style.color,
+          hidden: body === null ? 0 : body.querySelectorAll('[hidden]').length,
+        })
+      }
+      const answer = document.querySelector('.dshzr-item[data-kind="answer"] .dshzr-item-body')
+      if (answer !== null && answer.firstElementChild !== null) {
+        const html = String(answer.firstElementChild.outerHTML || '')
+        out.answer = { htmlLen: html.length, html: html.slice(0, 6000) }
+      }
+      return out
+    }
+
+    /** 把诊断信息 POST 到本地 harness（没启动就静默失败，不影响使用）。 */
+    function reportProbe(scope, turn) {
+      try {
+        const rows = scope === null || typeof scope.querySelectorAll !== 'function' ? [] : Array.prototype.slice.call(scope.querySelectorAll('[' + TURN_ATTR + ']'))
+        const census = rows.slice(0, 80).map((row) => [
+          row.getAttribute(TURN_ATTR),
+          row.getAttribute(FLOW_KIND_ATTR) || '?',
+          row.hasAttribute('hidden') ? 'h' : '',
+          row.hasAttribute('data-turn-process-hidden') ? 'p' : '',
+          textOf(row).length,
+          row.querySelectorAll('[' + HOST_ATTR + ']').length,
+          bodiesOf(row).length,
+        ])
+        const payload = {
+          version: VERSION,
+          turn: String(turn),
+          scopeTurns: rows.length,
+          probe: probeTurn(scope, turn),
+          render: probeRender(),
+          rows: census,
+        }
+        const request = fetch('http://127.0.0.1:8791/diag', {
+          method: 'POST',
+          mode: 'cors',
+          headers: { 'content-type': 'text/plain' },
+          body: JSON.stringify(payload),
+        })
+        if (request && typeof request.catch === 'function') request.catch(() => {})
+      } catch (error) {
+        /* 诊断通道不可用不影响插件 */
+      }
     }
 
     /** DOM 里已经渲染出来的轮次（打开面板时先用它，异步再补全）。 */
@@ -822,6 +956,44 @@ window.__ModuleLoader__.load({
     }
 
     /* ── 全屏阅读浮层 ──────────────────────────────────────────────────── */
+    /** 宿主用 hidden / display:none 折叠的内容，在浮层里一律展开——否则就会出现「有字数、看不见」。 */
+    function revealHidden(node) {
+      node.querySelectorAll('[hidden]').forEach((child) => child.removeAttribute('hidden'))
+      node.querySelectorAll('[style]').forEach((child) => {
+        const style = child.getAttribute('style') || ''
+        if (/display\s*:\s*none/i.test(style)) child.style.removeProperty('display')
+        if (/visibility\s*:\s*hidden/i.test(style)) child.style.removeProperty('visibility')
+      })
+      if (node.hasAttribute('hidden')) node.removeAttribute('hidden')
+    }
+
+    /**
+     * 去掉宿主的布局类（形如 xMeOpW_root / V4vHZW_flowItem / _1KfHza_actions），
+     * 只留 markdown 与 KaTeX 的类：这两套才是排版需要的，其余在浮层里只会带来
+     * max-height / overflow / 折叠之类的副作用。
+     */
+    function stripHostClasses(node) {
+      const isHostToken = (token) =>
+        (/^[A-Za-z0-9]{2,12}_[A-Za-z]/.test(token) || /^_[A-Za-z0-9]{5,8}_/.test(token)) &&
+        token.indexOf('markdown') < 0 &&
+        token.indexOf('katex') < 0
+      const targets = [node].concat(Array.prototype.slice.call(node.querySelectorAll('[class]')))
+      for (const element of targets) {
+        const tokens = tokensOf(element)
+        if (tokens.length === 0) continue
+        const kept = tokens.filter((token) => !isHostToken(token))
+        if (kept.length === tokens.length) continue
+        if (kept.length === 0) {
+          element.removeAttribute('class')
+          // 纯宿主包裹层：连内联样式一起去掉（display:none / opacity:0 / 固定高度
+          // 这类折叠样式正是回答「有字数、看不见」的来源）。
+          element.removeAttribute('style')
+        } else {
+          element.setAttribute('class', kept.join(' '))
+        }
+      }
+    }
+
     function sanitizeClone(node) {
       node.querySelectorAll('script,style,link,iframe,object,embed,noscript').forEach((child) => child.remove())
       // v0.3.2：每个公式都有 MathML（给读屏/复制用）与 HTML 两份；浮层里只保留可视的 HTML 那份，
@@ -831,6 +1003,11 @@ window.__ModuleLoader__.load({
       node.querySelectorAll('[' + HOST_ATTR + ']').forEach((child) => child.removeAttribute(HOST_ATTR))
       node.querySelectorAll('[contenteditable]').forEach((child) => child.setAttribute('contenteditable', 'false'))
       node.querySelectorAll('[tabindex]').forEach((child) => child.setAttribute('tabindex', '-1'))
+      // v0.3.7：真实 DSH 里回答被宿主的布局类/隐藏标记包着，克隆进浮层后会出现
+      // 「节点在、字数在、但看不见」（默认视口折叠、max-height、hidden 等）。
+      // 浮层不需要宿主的布局，只保留 markdown / KaTeX 两套样式类。
+      revealHidden(node)
+      stripHostClasses(node)
       if (node.hasAttribute('id')) node.removeAttribute('id')
       return node
     }
@@ -1434,6 +1611,8 @@ window.__ModuleLoader__.load({
         window.setTimeout(() => {
           void refreshRail()
         }, 30)
+        // 结构诊断（只统计数量/长度，不含正文），本地 harness 没开就静默失败。
+        window.setTimeout(() => reportProbe(state.scope, state.currentTurn), 500)
 
         backdrop.addEventListener('mousedown', (event) => {
           if (event.target === backdrop) close()
@@ -1519,22 +1698,27 @@ window.__ModuleLoader__.load({
       disposers.push(() => fab.remove())
 
       function onKeyDown(event) {
-        if (event.defaultPrevented) return
+        if (event.repeat) return
         if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
-        // Alt+Z / Alt+E 都是「打开 / 关闭最近一条回答」
-        const shortcut = event.key === 'z' || event.key === 'Z' || event.key === 'e' || event.key === 'E'
+        // 用 event.code 兜底：中文输入法/非英文键盘布局下 event.key 可能不是字母。
+        // 也不要因为 defaultPrevented 或「焦点在输入框里」就退出——DSH 的输入框是
+        // contenteditable，几乎总是有焦点，上一版正是被这两条挡住，Alt+Z 完全没反应。
+        const code = event.code || ''
+        const shortcut =
+          code === 'KeyZ' || code === 'KeyE' ||
+          event.key === 'z' || event.key === 'Z' || event.key === 'e' || event.key === 'E'
         if (!shortcut) return
-        const target = event.target
-        if (target instanceof Element && target.closest('input,textarea,[contenteditable="true"]')) return
         event.preventDefault()
+        event.stopPropagation()
         if (overlay.isOpen()) {
           overlay.close()
           return
         }
         openFor(nearestMessage())
       }
-      document.addEventListener('keydown', onKeyDown)
-      disposers.push(() => document.removeEventListener('keydown', onKeyDown))
+      // capture 阶段先取事件，避免被宿主的快捷键处理吃掉
+      window.addEventListener('keydown', onKeyDown, true)
+      disposers.push(() => window.removeEventListener('keydown', onKeyDown, true))
 
       // 调试 / 自检入口
       window.__DSH_READ_ZOOM__ = {
@@ -1555,6 +1739,17 @@ window.__ModuleLoader__.load({
           })(),
           compose: document.querySelector('.dshzr-compose textarea') !== null,
         }),
+        // 手动自检：__DSH_READ_ZOOM__.diagnose(轮次号) 返回该轮的结构统计
+        diagnose: (turn) => {
+          const scope = activeScope()
+          const target = turn === undefined ? (document.querySelector('.dshzr-turn[data-active]') || {}).getAttribute?.('data-turn') : turn
+          return probeTurn(scope, target === undefined || target === null ? '' : target)
+        },
+        report: () => {
+          const active = document.querySelector('.dshzr-turn[data-active]')
+          reportProbe(activeScope(), active === null ? '' : active.getAttribute('data-turn'))
+          return 'sent'
+        },
       }
 
       return () => {
