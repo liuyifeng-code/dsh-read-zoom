@@ -8,7 +8,7 @@
  *   2) 浮层内容 = 这条消息 DOM 的克隆（公式 / 表格 / 代码 / 图片的渲染结果原样保留，
  *      包括 KaTeX），再用 CSS `zoom` 整体等比放大；
  *   3) 浮层顶栏 A− / 百分比（点击重置）/ A+ / 复制文字 / 关闭，Esc、点蒙层也能关；
- *   4) 键盘 Alt+Z 直接放大「离视口最近的那条回答」；右下角常驻一个 Aa 小按钮
+ *   4) 键盘 Alt+Z / Alt+E 直接放大「离视口最近的那条回答」；右下角常驻一个 Aa 小按钮
  *      （固定位置，同样是放大最近一条回答），保证功能可发现。
  *
  * v0.2.1 起移除了「鼠标悬停时浮出药丸」的行为：药丸会跟着消息/滚动漂移，
@@ -22,6 +22,10 @@
  *   - 顶栏多一个「公式规约」按钮，一键复制数学/化学输出规约（可粘进 AGENTS.md）。
  *
  * 放大倍数记在 localStorage（键 dsh-read-zoom:zoom），默认 140%。
+ * v0.3.3 加了两件事：
+ *   - 打开 / 关闭不再「啪」地出现：遮罩淡入淡出、面板轻微上浮（只动 opacity/transform，
+ *     由合成器处理，不触发布局与重绘；系统开启「减少动态效果」时自动跳过动画）；
+ *   - 快捷键补一个更好记的 Alt+E（与 Alt+Z 等价，打开/关闭最近一条回答）。
  * 纯 DOM 实现，因此 DSH 前端升级后只要消息里仍带 data-text-interaction-source 就有效。
  */
 window.__ModuleLoader__.load({
@@ -38,7 +42,7 @@ window.__ModuleLoader__.load({
     // v0.3.2：操作行按钮的同步函数（安装时赋值），浮层关闭后用它补一次，避免依赖整页 MutationObserver。
     let actionSync = null
     // 版本号：DOM 上会写进 data-dshzr-version，便于在真实 DSH 里确认加载的是哪一版。
-    const VERSION = '0.3.2'
+    const VERSION = '0.3.3'
     // 每轮回答底部的操作行所在容器（DSH chat 的 TurnTailNodeView 带这个属性）。
     const TAIL_ATTR = 'data-turn-tail'
     // 16px 对角双箭头（放大/展开），药丸与操作行按钮共用；stroke 用 currentColor 跟随主题。
@@ -108,14 +112,23 @@ window.__ModuleLoader__.load({
          都重新采样并模糊背后的大段聊天 DOM，是「一卡一卡」的主要来源；纯半透明遮罩几乎零成本。 */
       '.dshzr-backdrop{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;',
       'justify-content:center;padding:3vh 3vw;box-sizing:border-box;',
-      'background:var(--dsw-alias-bg-mask-1,rgba(16,18,22,.55))}',
+      'background:var(--dsw-alias-bg-mask-1,rgba(16,18,22,.55));',
+      /* v0.3.3：进出场过渡只改 opacity/transform（合成器处理，不触发布局与重绘） */
+      'opacity:0;transition:opacity .16s ease-out}',
+      '.dshzr-backdrop[data-shown]{opacity:1}',
       '.dshzr-panel{display:flex;flex-direction:column;width:min(1280px,96vw);height:min(92vh,940px);',
       'max-height:94vh;contain:layout paint;',
       'box-sizing:border-box;overflow:hidden;',
       'border-radius:var(--dsw-radius-panel,16px);',
       'background:var(--dsw-alias-bg-layer-2,#ffffff);',
       'border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.10));',
-      'box-shadow:var(--dsw-shadow-lv3,0 24px 64px rgba(0,0,0,.28))}',
+      'box-shadow:var(--dsw-shadow-lv3,0 24px 64px rgba(0,0,0,.28));',
+      'opacity:.65;transform:translateY(10px) scale(.988);',
+      'transition:opacity .17s ease-out,transform .2s cubic-bezier(.22,.85,.3,1)}',
+      '.dshzr-backdrop[data-shown] .dshzr-panel{opacity:1;transform:none}',
+      '@media (prefers-reduced-motion: reduce){',
+      '.dshzr-backdrop{transition:none}',
+      '.dshzr-panel{transition:none;transform:none;opacity:1}}',
       '.dshzr-main{display:flex;flex:1 1 auto;min-height:0;overflow:hidden}',
 
       /* 左栏：轮次列表 + 输入框 */
@@ -432,7 +445,7 @@ window.__ModuleLoader__.load({
       const button = document.createElement('button')
       button.type = 'button'
       button.className = (sample === null ? '' : sample.className + ' ') + 'dshzr-tail-btn'
-      button.title = '放大阅读这条回答（v' + VERSION + '，Alt+Z）'
+      button.title = '放大阅读这条回答（v' + VERSION + '，Alt+Z / Alt+E）'
       button.setAttribute('aria-label', '放大阅读这条回答')
       button.setAttribute('data-dshzr-tail', '')
       button.setAttribute('data-dshzr-version', VERSION)
@@ -856,15 +869,16 @@ window.__ModuleLoader__.load({
         }, 1400)
       }
 
-      function close() {
+      function close(options) {
         if (!state.open) return
         state.open = false
+        const immediate = options && options.immediate === true
         state.selectSeq += 1
         state.enrichSeq += 1
         const savedScrollTop = state.savedScrollTop
         const chatScroller = conversationScroller()
         state.savedScrollTop = null
-        if (state.backdrop && state.backdrop.parentNode) state.backdrop.parentNode.removeChild(state.backdrop)
+        const backdrop = state.backdrop
         state.backdrop = null
         state.content = null
         state.zoomLabel = null
@@ -887,6 +901,21 @@ window.__ModuleLoader__.load({
         if (state.disposeKey) state.disposeKey()
         state.disposeKey = null
         document.body.classList.remove('dshzr-noscroll')
+        if (backdrop !== null) {
+          const removeBackdrop = () => {
+            if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop)
+          }
+          const reduced =
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          if (immediate || reduced) {
+            removeBackdrop()
+          } else {
+            // 退出过渡：先撤 data-shown 让 opacity/transform 归位，动画跑完再摘节点
+            backdrop.removeAttribute('data-shown')
+            window.setTimeout(removeBackdrop, 170)
+          }
+        }
         // 浮层期间为了不抢主线程，操作行按钮的同步被跳过了；关闭后补一次（等 React 落完这一帧）
         if (typeof actionSync === 'function') {
           window.setTimeout(() => {
@@ -1211,6 +1240,8 @@ window.__ModuleLoader__.load({
       function open(message) {
         if (!message || !message.body || !message.body.isConnected) return false
         if (state.open) close()
+        // 若上一个浮层还在跑退出动画，直接摘掉，避免两层遮罩叠着闪一下
+        document.querySelectorAll('.dshzr-backdrop').forEach((node) => node.remove())
         state.prevFocus = document.activeElement
         state.zoom = readZoom()
         state.selectSeq = 0
@@ -1246,7 +1277,7 @@ window.__ModuleLoader__.load({
 
         const hint = document.createElement('div')
         hint.className = 'dshzr-hint'
-        hint.textContent = '↑↓ 换轮 · Ctrl+滚轮缩放 · Esc 关闭'
+        hint.textContent = 'Alt+Z / Alt+E 关闭 · ↑↓ 换轮 · Ctrl+滚轮缩放 · Esc 关闭'
 
         const spacer = document.createElement('div')
         spacer.className = 'dshzr-spacer'
@@ -1326,6 +1357,11 @@ window.__ModuleLoader__.load({
         panel.appendChild(main)
         backdrop.appendChild(panel)
         document.body.appendChild(backdrop)
+        // 先以初始态插入一帧，再加 data-shown 触发过渡（用 setTimeout 而不是 rAF：
+        // 后台窗口/无头环境下 rAF 可能不触发，会导致浮层停在半透明初始态）
+        window.setTimeout(() => {
+          if (backdrop.isConnected) backdrop.setAttribute('data-shown', '')
+        }, 16)
 
         state.open = true
         state.backdrop = backdrop
@@ -1415,8 +1451,8 @@ window.__ModuleLoader__.load({
       fab.className = 'dshzr-fab'
       fab.textContent = 'Aa'
       fab.dataset.dshzrVersion = VERSION
-      fab.title = '放大阅读最近一条回答（v' + VERSION + '，Alt+Z）'
-      fab.setAttribute('aria-label', '放大阅读最近一条回答（Alt+Z）')
+      fab.title = '放大阅读最近一条回答（v' + VERSION + '，Alt+Z / Alt+E）'
+      fab.setAttribute('aria-label', '放大阅读最近一条回答（Alt+Z 或 Alt+E）')
       fab.addEventListener('click', () => openFor(nearestMessage()))
       document.body.appendChild(fab)
       disposers.push(() => fab.remove())
@@ -1424,7 +1460,9 @@ window.__ModuleLoader__.load({
       function onKeyDown(event) {
         if (event.defaultPrevented) return
         if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
-        if (event.key !== 'z' && event.key !== 'Z') return
+        // Alt+Z / Alt+E 都是「打开 / 关闭最近一条回答」
+        const shortcut = event.key === 'z' || event.key === 'Z' || event.key === 'e' || event.key === 'E'
+        if (!shortcut) return
         const target = event.target
         if (target instanceof Element && target.closest('input,textarea,[contenteditable="true"]')) return
         event.preventDefault()
