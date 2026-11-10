@@ -1,10 +1,32 @@
-# dsh-read-zoom —— 放大阅读
+# 放大阅读 · dsh-read-zoom
 
-给 DSH 加一个「放大」入口：点开后把**整轮提问与回答**放进全屏两栏阅读区，用更大的字号重读；
-左栏列出本会话的每一轮（带提问摘要），可以随时跳转，还能顺手写下一句直接填进 DSH 输入框。
+给长时间看 DSH 的人做的阅读层——**不用把脸凑到屏幕上，也能读完一整篇推导。**
 
-公式（KaTeX）、表格、代码块、图片都保持原来的渲染结果，不会重新解析 Markdown。
-顺手做了三件跟公式有关的事：失败公式不再显示刺眼红字、超宽公式自动缩到放得下、数学与化学输出规约一键复制。
+DSH 的正文是 14px、一行铺满整个窗口。看十分钟没事；看一小时，眼睛和脖子先投降。
+放大阅读把「一条回答」变成「一页可读的文字」：
+
+- **拉开距离**：80%–300% 缩放，行宽收窄到舒适区间，姿势不用前倾；
+- **按目录读**：左栏列出本会话每一轮（含还没加载的历史），点一下就到，不用滚回顶部找；
+- **读完接着问**：底部输入框写下一句，只填入 DSH 真实输入框、**不自动发送**，不用退出面板；
+- **公式保真**：公式 / 表格 / 代码保持真实渲染结果，超宽公式自动缩小，渲染失败降级不刺眼；
+- **不拖慢**：不做整屏模糊，长文滚动与输入都不掉帧；`Alt+Z` / `Alt+E` 随时开关。
+
+> 适合：刷题看推导、读论文与教材、审长回答、抄代码前想先读清楚。
+> 不适合：只想临时放大某段文字——DSH 设置里的字号就够了。
+
+## English
+
+A reading layer for long DSH sessions — **keep your distance from the screen and still read a whole derivation.**
+
+DSH renders 14px text edge to edge. Fine for ten minutes; punishing after an hour.
+Read-zoom turns one answer into one readable page:
+
+- **Lean back**: 80–300% zoom with a narrower measure;
+- **Read by outline**: every turn of the session listed on the left, including history not yet loaded;
+- **Keep going**: a "fill, don't send" composer at the bottom — no need to leave the panel;
+- **Formulas intact**: rendered KaTeX/HTML preserved, over-wide formulas shrink, failures degrade quietly;
+- **Stays light**: no full-screen blur, smooth scrolling and typing; toggle with `Alt+Z` / `Alt+E`.
+
 
 ## 怎么用
 
@@ -57,7 +79,7 @@
 | `↑` / `↓` | 在轮次列表里切换上一轮 / 下一轮 |
 | `Ctrl`（`⌘`）+ 滚轮 | 在浮层里缩小 / 放大 |
 
-> 在输入框、文本域或可编辑区域里打字时，`Alt+Z` / `Alt+E` 不会触发，避免和输入冲突。
+> v0.3.7 起快捷键在 window 的 capture 阶段监听，**焦点在 DSH 输入框里也能用**（快捷键与输入不冲突：只有按 Alt 组合才触发）。
 
 ## 动效（v0.3.3）
 
@@ -100,8 +122,8 @@ v0.3.1 在真实会话里「打开 / 滚动 / 打字都一卡一卡」，v0.3.2 
   中间过程轮次的操作行本来就悬停才出现，放大按钮跟着一起出现。
 - 流式生成过程中整块会重渲染，插件用 MutationObserver 把按钮补回去（v0.3.2 起改为空闲时扫描，
   浮层打开期间不扫，关闭后补一次）。
-- 版本号写在 DOM 上，方便确认加载的是哪一版：按钮带 `data-dshzr-version="0.3.4"`，
-  右下角 `Aa` 的鼠标提示里也带版本号（当前 0.3.8）。
+- 版本号写在 DOM 上，方便确认加载的是哪一版：按钮带 `data-dshzr-version="0.3.9"`，
+  右下角 `Aa` 的鼠标提示里也带版本号（当前 0.3.9）。
 - **轮次列表的数据源**（v0.3.1）：DSH 的聊天时间线是虚拟滚动的，历史轮次不一定在 DOM 里，
   所以列表改读原生轮次导航（`nav[aria-label="轮次导航"]` 里的 `button.SNx2jG_mark`），
   用 `aria-label`（「跳转到第 N 轮」/「加载并跳转到第 N 轮」）解析轮次号；
@@ -161,7 +183,7 @@ window.__DSHZR_LOG__                 // 最近 200 条内部事件日志
 
 如果放大按钮没出现：
 
-1. 先看 `peek().version` —— 不是 `0.3.4` 说明窗口加载的还是旧代码（强刷或重启 DSH）；
+1. 先看 `peek().version` —— 不是 `0.3.9` 说明窗口加载的还是旧代码（强刷或重启 DSH）；
 2. 再看 `peek().railMarks` —— 为 0 说明没找到 DSH 的轮次导航（会话里只有 1 轮时它本来就不渲染），
    这时轮次列表会退化成「只列 DOM 里已有的轮次」；
 2. 再看 `messages()` 是否为 0 —— 为 0 说明 DSH 升级后改了消息 DOM 结构，要更新消息识别逻辑；
@@ -169,6 +191,8 @@ window.__DSHZR_LOG__                 // 最近 200 条内部事件日志
    或者该轮次的操作行还没渲染出来（流式生成中属正常）。
 
 ## 更新记录
+
+- **0.3.9**：重写介绍——把定位讲清楚（给长时间看 DSH 的人：拉开距离、按目录读、读完接着问）；`package.json` 补齐 `keywords` / `repository` / `homepage` / `bugs`，首次发布到 npm
 
 - **0.3.8**：真实 DSH 里「已停止」有时只是一行小字、class 名里没有 stop 字样，导致截断提示不出现、面板里只显示「已停止」两个字；现在除了看标记，还会看「这一行是不是只有一句『已停止』」，命中就按截断处理。
 - **0.3.7**：修 Alt+Z / Alt+E 一直没反应（监听挂在冒泡阶段、且被「焦点在输入框就跳过」和 defaultPrevented 挡住）——改成 window 的 capture 阶段、用 event.code 兜底、去掉两道误判。同时修「放大后回答区空白」：展开 [hidden] 与内联 display:none、剥掉宿主布局类（只留 markdown/KaTeX）、面板内禁用动画并强制可见。

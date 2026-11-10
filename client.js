@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
     // v0.3.2：操作行按钮的同步函数（安装时赋值），浮层关闭后用它补一次，避免依赖整页 MutationObserver。
     let actionSync = null
     // 版本号：DOM 上会写进 data-dshzr-version，便于在真实 DSH 里确认加载的是哪一版。
-    const VERSION = '0.3.8'
+    const VERSION = '0.3.9'
     // 每轮回答底部的操作行所在容器（DSH chat 的 TurnTailNodeView 带这个属性）。
     const TAIL_ATTR = 'data-turn-tail'
     // 16px 对角双箭头（放大/展开），药丸与操作行按钮共用；stroke 用 currentColor 跟随主题。
