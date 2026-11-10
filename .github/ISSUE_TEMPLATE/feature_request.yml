@@ -1,0 +1,37 @@
+﻿name: 功能建议 / Feature request
+description: 想要一个新能力，或觉得某个交互可以更好
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先说结论：**你想要解决什么问题**，比「加一个按钮」更有用。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的情况
+      description: 你在什么场景下觉得不顺手？现在要绕几步？
+      placeholder: 例如：读一篇 40 轮的推导时，想回到第 12 轮对照，但列表太密、扫不到关键词
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你希望它怎么工作
+      description: 一句话描述理想流程；有参考产品/截图更好
+  - type: input
+    id: version
+    attributes:
+      label: 插件版本
+      description: 放大面板右上角「放大阅读」旁边，或按钮悬停提示里的 v0.x.y
+      placeholder: v0.4.0
+  - type: input
+    id: dsh
+    attributes:
+      label: DSH 版本
+      placeholder: 0.2.2-rc.1
+  - type: dropdown
+    id: os
+    attributes:
+      label: 系统
+      options: [Windows, macOS, Linux]

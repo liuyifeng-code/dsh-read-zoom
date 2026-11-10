@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
     // v0.3.2：操作行按钮的同步函数（安装时赋值），浮层关闭后用它补一次，避免依赖整页 MutationObserver。
     let actionSync = null
     // 版本号：DOM 上会写进 data-dshzr-version，便于在真实 DSH 里确认加载的是哪一版。
-    const VERSION = '0.3.9'
+    const VERSION = '0.4.0'
     // 每轮回答底部的操作行所在容器（DSH chat 的 TurnTailNodeView 带这个属性）。
     const TAIL_ATTR = 'data-turn-tail'
     // 16px 对角双箭头（放大/展开），药丸与操作行按钮共用；stroke 用 currentColor 跟随主题。
@@ -1070,6 +1070,38 @@ window.__ModuleLoader__.load({
         }, 1400)
       }
 
+      function diagnosticText() {
+        let stateText = '未知'
+        try {
+          stateText = JSON.stringify(window.__DSH_READ_ZOOM__.peek())
+        } catch (error) {
+          stateText = '未知（' + String(error && error.message) + '）'
+        }
+        let dshVersion = '未知'
+        try {
+          const boot = window.__DSH_BOOT__
+          dshVersion = (boot && (boot.version || (boot.manifest && boot.manifest.version))) || '未知'
+        } catch (error) {
+          dshVersion = '未知'
+        }
+        return [
+          '### 现象',
+          '',
+          '（描述发生了什么，和你的预期差在哪；截图可以直接拖进来）',
+          '',
+          '### 复现步骤',
+          '',
+          '1. ',
+          '',
+          '### 环境（自动填充，可删改）',
+          '',
+          '- 插件版本：v' + VERSION,
+          '- DSH 版本：' + dshVersion,
+          '- 运行环境：' + (navigator.userAgent || '未知'),
+          '- 面板状态：' + stateText,
+        ].join('\n')
+      }
+
       function close(options) {
         if (!state.open) return
         state.open = false
@@ -1517,6 +1549,7 @@ window.__ModuleLoader__.load({
         const plus = makeButton('A+', '增大字号')
         const copy = makeButton('复制文字', '复制这一轮的纯文本')
         const rules = makeButton('公式规约', '复制数学/化学输出规约（可粘进 AGENTS.md）')
+        const feedback = makeButton('反馈', '在 GitHub 上提一条反馈（自动带上版本与诊断信息）')
         const closeButton = makeButton('关闭', '关闭放大阅读（Esc）')
         closeButton.className = 'dshzr-btn dshzr-close'
 
@@ -1534,6 +1567,15 @@ window.__ModuleLoader__.load({
           copyText(text, '已复制这一轮的纯文本')
         })
         rules.addEventListener('click', () => copyText(MATH_RULES, '已复制数学/化学输出规约（可粘进 AGENTS.md）'))
+        feedback.addEventListener('click', () => {
+          const info = diagnosticText()
+          const url =
+            'https://github.com/liuyifeng-code/dsh-read-zoom/issues/new?template=bug_report.yml' +
+            '&title=' + encodeURIComponent('[bug] ') +
+            '&body=' + encodeURIComponent(info)
+          window.open(url, '_blank', 'noopener')
+          toast('已在浏览器打开反馈页（内容已预填）')
+        })
 
         const main = document.createElement('div')
         main.className = 'dshzr-main'
@@ -1581,6 +1623,7 @@ window.__ModuleLoader__.load({
         head.appendChild(plus)
         head.appendChild(copy)
         head.appendChild(rules)
+        head.appendChild(feedback)
         head.appendChild(closeButton)
         panel.appendChild(head)
         panel.appendChild(main)

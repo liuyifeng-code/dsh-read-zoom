@@ -190,8 +190,18 @@ window.__DSHZR_LOG__                 // 最近 200 条内部事件日志
 3. 再看 `peek().tailButtons` 是否为 0 —— 为 0 说明操作行结构变了（`_actions`/`_endInfo` 找不到），
    或者该轮次的操作行还没渲染出来（流式生成中属正常）。
 
+## 反馈
+
+遇到问题或有想法，两条路：
+
+- **面板里点「反馈」**：会打开 GitHub 新建 issue，自动带上插件版本、DSH 版本、浏览器环境与面板状态（`peek()` 快照），你只需要补「现象 + 复现步骤」，截图直接拖进 issue 即可；
+- **直接去 GitHub**：[提交 Bug](https://github.com/liuyifeng-code/dsh-read-zoom/issues/new?template=bug_report.yml) / [提功能建议](https://github.com/liuyifeng-code/dsh-read-zoom/issues/new?template=feature_request.yml) / [Discussions](https://github.com/liuyifeng-code/dsh-read-zoom/discussions)。
+
+FAQ 与排障先看下面「## 调试 / 排障」：`__DSH_READ_ZOOM__.peek()` 能直接告诉你版本、轮次数、按钮数与面板状态，多数问题一眼能定位。
+
 ## 更新记录
 
+- **0.4.0**：面板顶栏增加「反馈」按钮——一键打开 GitHub issue 模板，自动预填插件版本 / DSH 版本 / 环境 / 面板状态；仓库补 issue 模板（Bug 反馈、功能建议）并关闭空 issue。
 - **0.3.9**：重写介绍——把定位讲清楚（给长时间看 DSH 的人：拉开距离、按目录读、读完接着问）；`package.json` 补齐 `keywords` / `repository` / `homepage` / `bugs`，首次发布到 npm
 
 - **0.3.8**：真实 DSH 里「已停止」有时只是一行小字、class 名里没有 stop 字样，导致截断提示不出现、面板里只显示「已停止」两个字；现在除了看标记，还会看「这一行是不是只有一句『已停止』」，命中就按截断处理。

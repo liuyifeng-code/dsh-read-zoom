@@ -1,6 +1,6 @@
 {
   "name": "dsh-read-zoom",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "type": "module",
   "description": "A reading layer for long DeepSeek Harness sessions: a fixed enlarge button on every answer opens a two-pane reading view with large-type rendered answers, a session outline and a fill-don't-send composer — so you can read papers, proofs and problem sets for hours without leaning into the screen.",
   "keywords": [

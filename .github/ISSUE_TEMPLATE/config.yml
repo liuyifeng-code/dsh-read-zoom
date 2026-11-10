@@ -1,0 +1,8 @@
+﻿blank_issues_enabled: false
+contact_links:
+  - name: 使用问题 / 快速提问
+    url: https://github.com/liuyifeng-code/dsh-read-zoom/discussions
+    about: 不确定是不是 bug、想先聊聊用法，去 Discussions
+  - name: DSH 插件市场
+    url: https://dshmk.com
+    about: 浏览其他 DSH 插件
